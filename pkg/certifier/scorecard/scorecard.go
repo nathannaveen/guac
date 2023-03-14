@@ -68,7 +68,9 @@ func (s scorecard) CertifyComponent(_ context.Context, rootComponent interface{}
 		return fmt.Errorf("artifact name cannot be empty")
 	}
 
-	score, err := s.scorecard.GetScore(repoName, artifactNode.Digest)
+	digest := strings.TrimLeft(artifactNode.Digest, "sha1:")
+
+	score, err := s.scorecard.GetScore(repoName, digest)
 	if err != nil {
 		return fmt.Errorf("error getting scorecard result: %w", err)
 	}
