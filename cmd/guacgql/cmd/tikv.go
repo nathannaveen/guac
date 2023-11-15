@@ -13,13 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build tools
-// +build tools
+//go:build !(386 || arm || mips || darwin)
 
-package tools
+package cmd
 
-import (
-	_ "github.com/99designs/gqlgen"
-	_ "github.com/Khan/genqlient"
-	_ "github.com/golang/mock/mockgen"
-)
+import "github.com/guacsec/guac/pkg/assembler/kv/tikv"
+
+func init() {
+	// TiKV does not support 32 bit. Also darwin required CGO and cross compile
+	// using xcode...
+	tikvGS = tikv.GetStore
+}
