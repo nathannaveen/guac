@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/Khan/genqlient/graphql"
+	"github.com/guacsec/guac/pkg/dependencies"
 	gen "github.com/guacsec/guac/pkg/guacrest/generated"
 )
 
@@ -37,7 +38,34 @@ func (s *DefaultServer) HealthCheck(ctx context.Context, request gen.HealthCheck
 }
 
 func (s *DefaultServer) AnalyzeDependencies(ctx context.Context, request gen.AnalyzeDependenciesRequestObject) (gen.AnalyzeDependenciesResponseObject, error) {
-	return nil, fmt.Errorf("Unimplemented")
+	if request.Params.Sort == "frequency" {
+		deps := dependencies.New(ctx, s.gqlClient)
+		packages, err := deps.GetSortedDependents()
+		if err != nil {
+			return gen.AnalyzeDependencies500JSONResponse{
+				InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+					Message: fmt.Sprintf("failed to get sorted dependents %v", err.Error()),
+				},
+			}, fmt.Errorf("failed to get sorted dependencies %v", err)
+		}
+
+		var packageNames []gen.PackageName
+
+		for _, p := range packages {
+			pac := p // have to do this because we don't want packageNames to keep on appending a pointer of the same variable p.
+			packageNames = append(packageNames, gen.PackageName{
+				Name:           &pac.Name,
+				DependentCount: &pac.DependentCount,
+			})
+		}
+
+		val := gen.AnalyzeDependencies200JSONResponse{
+			PackageNameListJSONResponse: packageNames,
+		}
+
+		return val, nil
+	}
+	return gen.AnalyzeDependencies200JSONResponse{PackageNameListJSONResponse: []gen.PackageName{}}, nil
 }
 
 func (s *DefaultServer) RetrieveDependencies(ctx context.Context, request gen.RetrieveDependenciesRequestObject) (gen.RetrieveDependenciesResponseObject, error) {
