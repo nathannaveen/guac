@@ -275,6 +275,8 @@ type BadRequestJSONResponse Error
 
 type InternalServerErrorJSONResponse Error
 
+type PackageNameListJSONResponse []PackageName
+
 type PurlListJSONResponse []Purl
 
 type AnalyzeDependenciesRequestObject struct {
@@ -285,7 +287,7 @@ type AnalyzeDependenciesResponseObject interface {
 	VisitAnalyzeDependenciesResponse(w http.ResponseWriter) error
 }
 
-type AnalyzeDependencies200JSONResponse struct{ PurlListJSONResponse }
+type AnalyzeDependencies200JSONResponse struct{ PackageNameListJSONResponse }
 
 func (response AnalyzeDependencies200JSONResponse) VisitAnalyzeDependenciesResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")

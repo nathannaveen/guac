@@ -14,6 +14,12 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// PackageName defines model for PackageName.
+type PackageName struct {
+	DependentCount *int    `json:"DependentCount,omitempty"`
+	Name           *string `json:"Name,omitempty"`
+}
+
 // Purl defines model for Purl.
 type Purl = string
 
@@ -25,6 +31,9 @@ type BadRequest = Error
 
 // InternalServerError defines model for InternalServerError.
 type InternalServerError = Error
+
+// PackageNameList defines model for PackageNameList.
+type PackageNameList = []PackageName
 
 // PurlList defines model for PurlList.
 type PurlList = []Purl

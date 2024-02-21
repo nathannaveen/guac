@@ -307,7 +307,7 @@ type ClientWithResponsesInterface interface {
 type AnalyzeDependenciesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *PurlList
+	JSON200      *PackageNameList
 	JSON400      *BadRequest
 	JSON500      *InternalServerError
 	JSON502      *BadGateway
@@ -418,7 +418,7 @@ func ParseAnalyzeDependenciesResponse(rsp *http.Response) (*AnalyzeDependenciesR
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest PurlList
+		var dest PackageNameList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
