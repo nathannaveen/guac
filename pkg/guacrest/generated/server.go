@@ -25,6 +25,9 @@ type ServerInterface interface {
 	// Retrieve the dependencies of a package
 	// (GET /query/dependencies)
 	RetrieveDependencies(w http.ResponseWriter, r *http.Request, params RetrieveDependenciesParams)
+	// Score the Next Actionable Critical Dependency based on provided metrics
+	// (POST /scoreNACD)
+	ScoreNACD(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -46,6 +49,12 @@ func (_ Unimplemented) HealthCheck(w http.ResponseWriter, r *http.Request) {
 // Retrieve the dependencies of a package
 // (GET /query/dependencies)
 func (_ Unimplemented) RetrieveDependencies(w http.ResponseWriter, r *http.Request, params RetrieveDependenciesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Score the Next Actionable Critical Dependency based on provided metrics
+// (POST /scoreNACD)
+func (_ Unimplemented) ScoreNACD(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -150,6 +159,21 @@ func (siw *ServerInterfaceWrapper) RetrieveDependencies(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RetrieveDependencies(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// ScoreNACD operation middleware
+func (siw *ServerInterfaceWrapper) ScoreNACD(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScoreNACD(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -281,6 +305,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/query/dependencies", wrapper.RetrieveDependencies)
 	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/scoreNACD", wrapper.ScoreNACD)
+	})
 
 	return r
 }
@@ -403,6 +430,43 @@ func (response RetrieveDependencies502JSONResponse) VisitRetrieveDependenciesRes
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ScoreNACDRequestObject struct {
+	Body *ScoreNACDJSONRequestBody
+}
+
+type ScoreNACDResponseObject interface {
+	VisitScoreNACDResponse(w http.ResponseWriter) error
+}
+
+type ScoreNACD200JSONResponse NACDScoreResponse
+
+func (response ScoreNACD200JSONResponse) VisitScoreNACDResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ScoreNACD400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ScoreNACD400JSONResponse) VisitScoreNACDResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ScoreNACD500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ScoreNACD500JSONResponse) VisitScoreNACDResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Identify the most important dependencies
@@ -414,6 +478,9 @@ type StrictServerInterface interface {
 	// Retrieve the dependencies of a package
 	// (GET /query/dependencies)
 	RetrieveDependencies(ctx context.Context, request RetrieveDependenciesRequestObject) (RetrieveDependenciesResponseObject, error)
+	// Score the Next Actionable Critical Dependency based on provided metrics
+	// (POST /scoreNACD)
+	ScoreNACD(ctx context.Context, request ScoreNACDRequestObject) (ScoreNACDResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -514,6 +581,37 @@ func (sh *strictHandler) RetrieveDependencies(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RetrieveDependenciesResponseObject); ok {
 		if err := validResponse.VisitRetrieveDependenciesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScoreNACD operation middleware
+func (sh *strictHandler) ScoreNACD(w http.ResponseWriter, r *http.Request) {
+	var request ScoreNACDRequestObject
+
+	var body ScoreNACDJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScoreNACD(ctx, request.(ScoreNACDRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScoreNACD")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScoreNACDResponseObject); ok {
+		if err := validResponse.VisitScoreNACDResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

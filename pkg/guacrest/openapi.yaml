@@ -76,6 +76,28 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "502":
           $ref: "#/components/responses/BadGateway"
+  "/scoreNACD":
+    post:
+      summary: Score the Next Actionable Critical Dependency based on provided metrics
+      operationId: scoreNACD
+      requestBody:
+        description: JSON document containing metrics for scoring, including criticality and likelihood factors. This document is optional, but if provided, all properties are required.
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NACDScoreRequest'
+      responses:
+        "200":
+          description: Scoring result with detailed metrics analysis.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NACDScoreResponse'
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
 
 components:
@@ -125,6 +147,79 @@ components:
           type: string
         DependentCount:
           type: integer
+    NACDScoreRequest:
+      type: object
+      required:
+        - criticalityWeight
+        - likelihoodWeight
+        - criticality
+        - likelihood
+      properties:
+        criticalityWeight:
+          type: number
+          description: Weight of the criticality in the overall score.
+        likelihoodWeight:
+          type: number
+          description: Weight of the likelihood in the overall score.
+        criticality:
+          type: object
+          properties:
+            numberOfDependents:
+              type: object
+              properties:
+                k:
+                  type: number
+                  description: Coefficient for scaling the number of dependents.
+                l:
+                  type: number
+                  description: Offset for the number of dependents.
+                weight:
+                  type: number
+                  description: Weight of the number of dependents in the overall criticality score.
+              required: [k, l, weight] # These fields are required if numberOfDependents is provided
+        likelihood:
+          type: object
+          properties:
+            scorecard:
+              type: object
+              properties:
+                k:
+                  type: number
+                  description: Coefficient for scaling the scorecard score.
+                l:
+                  type: number
+                  description: Offset for the scorecard score.
+                weight:
+                  type: number
+                  description: Weight of the scorecard score in the overall likelihood score.
+              required: [k, l, weight] # These fields are required if scorecard is provided
+    NACDScoreResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          pkgName:
+            type: string
+            description: Name of the package
+          criticalityScore:
+            type: number
+            description: The criticality of a package.
+          likelihoodScore:
+            type: number
+            description: The likelihood of a package getting a vulnerability.
+          riskScore:
+            type: number
+            description: The risk of a vulnerability of a package.
+          metrics:
+            type: object
+            description: Detailed metrics analysis.
+            properties:
+              numberOfDependents:
+                type: integer
+                description: Number of packages that depend on this package.
+              scorecardScore:
+                type: number
+                description: The OpenSSF Scorecard score of this package.
   responses:
     # for code 200
     PurlList:

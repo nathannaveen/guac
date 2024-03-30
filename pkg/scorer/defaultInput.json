@@ -1,0 +1,18 @@
+{
+  "criticality": {
+    "number_of_dependents": {
+      "k_value": 0.5,
+      "parameter": 2,
+      "l_value": 1,
+      "weight": 2
+    }
+  },
+  "likelihood": {
+    "scorecard": {
+      "k_value": 0.7,
+      "parameter": 4.2,
+      "l_value": 10,
+      "weight": 6.2
+    }
+  }
+}

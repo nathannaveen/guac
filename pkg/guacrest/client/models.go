@@ -14,6 +14,64 @@ type Error struct {
 	Message string `json:"Message"`
 }
 
+// NACDScoreRequest defines model for NACDScoreRequest.
+type NACDScoreRequest struct {
+	Criticality struct {
+		NumberOfDependents *struct {
+			// K Coefficient for scaling the number of dependents.
+			K float32 `json:"k"`
+
+			// L Offset for the number of dependents.
+			L float32 `json:"l"`
+
+			// Weight Weight of the number of dependents in the overall criticality score.
+			Weight float32 `json:"weight"`
+		} `json:"numberOfDependents,omitempty"`
+	} `json:"criticality"`
+
+	// CriticalityWeight Weight of the criticality in the overall score.
+	CriticalityWeight float32 `json:"criticalityWeight"`
+	Likelihood        struct {
+		Scorecard *struct {
+			// K Coefficient for scaling the scorecard score.
+			K float32 `json:"k"`
+
+			// L Offset for the scorecard score.
+			L float32 `json:"l"`
+
+			// Weight Weight of the scorecard score in the overall likelihood score.
+			Weight float32 `json:"weight"`
+		} `json:"scorecard,omitempty"`
+	} `json:"likelihood"`
+
+	// LikelihoodWeight Weight of the likelihood in the overall score.
+	LikelihoodWeight float32 `json:"likelihoodWeight"`
+}
+
+// NACDScoreResponse defines model for NACDScoreResponse.
+type NACDScoreResponse = []struct {
+	// CriticalityScore The criticality of a package.
+	CriticalityScore *float32 `json:"criticalityScore,omitempty"`
+
+	// LikelihoodScore The likelihood of a package getting a vulnerability.
+	LikelihoodScore *float32 `json:"likelihoodScore,omitempty"`
+
+	// Metrics Detailed metrics analysis.
+	Metrics *struct {
+		// NumberOfDependents Number of packages that depend on this package.
+		NumberOfDependents *int `json:"numberOfDependents,omitempty"`
+
+		// ScorecardScore The OpenSSF Scorecard score of this package.
+		ScorecardScore *float32 `json:"scorecardScore,omitempty"`
+	} `json:"metrics,omitempty"`
+
+	// PkgName Name of the package
+	PkgName *string `json:"pkgName,omitempty"`
+
+	// RiskScore The risk of a vulnerability of a package.
+	RiskScore *float32 `json:"riskScore,omitempty"`
+}
+
 // PackageName defines model for PackageName.
 type PackageName struct {
 	DependentCount int    `json:"DependentCount"`
@@ -70,3 +128,6 @@ type RetrieveDependenciesParams struct {
 	// Purl the purl of the dependent package
 	Purl string `form:"purl" json:"purl"`
 }
+
+// ScoreNACDJSONRequestBody defines body for ScoreNACD for application/json ContentType.
+type ScoreNACDJSONRequestBody = NACDScoreRequest

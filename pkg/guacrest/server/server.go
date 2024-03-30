@@ -18,6 +18,8 @@ package server
 import (
 	"context"
 	"fmt"
+	model "github.com/guacsec/guac/pkg/assembler/clients/generated"
+	"github.com/guacsec/guac/pkg/scorer"
 
 	"github.com/Khan/genqlient/graphql"
 	"github.com/guacsec/guac/pkg/dependencies"
@@ -35,6 +37,106 @@ func NewDefaultServer(gqlClient graphql.Client) *DefaultServer {
 
 func (s *DefaultServer) HealthCheck(ctx context.Context, request gen.HealthCheckRequestObject) (gen.HealthCheckResponseObject, error) {
 	return gen.HealthCheck200JSONResponse("Server is healthy"), nil
+}
+
+func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequestObject) (gen.ScoreNACDResponseObject, error) {
+	likelihoodParams := make(map[string][]scorer.ParameterValues)
+	criticalityParams := make(map[string][]scorer.ParameterValues)
+
+	scorecardValues := make(map[string]float64)
+	numberOfDependentsValues := make(map[string]int)
+
+	if request.Body == nil {
+		// we know that the user didn't provide a JSON document, so we use our default document
+	} else {
+		// the user provided a JSON document
+
+		if request.Body.Criticality.NumberOfDependents != nil {
+			dependents, err := dependencies.GetDependenciesBySortedDependentCnt(ctx, s.gqlClient)
+
+			if err != nil {
+				fmt.Errorf("error getting dependencies: %v", err)
+			}
+
+			for _, pkg := range dependents {
+				p := scorer.ParameterValues{
+					Parameter: float64(pkg.DependentCount),
+					Weight:    float64(request.Body.Criticality.NumberOfDependents.Weight),
+					K:         float64(request.Body.Criticality.NumberOfDependents.K),
+					L:         float64(request.Body.Criticality.NumberOfDependents.L),
+				}
+				criticalityParams[pkg.Name] = append(criticalityParams[pkg.Name], p)
+				numberOfDependentsValues[pkg.Name] = pkg.DependentCount
+			}
+		}
+
+		if request.Body.Likelihood.Scorecard != nil {
+			scores, err := model.Scorecards(ctx, s.gqlClient, model.CertifyScorecardSpec{})
+
+			if err != nil {
+				fmt.Println(err)
+			}
+
+			for _, scorecard := range scores.Scorecards {
+				name := scorecard.Source.Type + "_" + scorecard.Source.Namespaces[0].Namespace + "_" + scorecard.Source.Namespaces[0].Names[0].Name
+
+				p := scorer.ParameterValues{
+					Parameter: scorecard.Scorecard.AggregateScore,
+					Weight:    float64(request.Body.Likelihood.Scorecard.Weight),
+					K:         float64(request.Body.Likelihood.Scorecard.K),
+					L:         float64(request.Body.Likelihood.Scorecard.L),
+				}
+				likelihoodParams[name] = append(likelihoodParams[name], p)
+				scorecardValues[name] = scorecard.Scorecard.AggregateScore
+			}
+		}
+	}
+
+	packages, err := model.Packages(ctx, s.gqlClient, model.PkgSpec{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get packages: %v", err)
+	}
+
+	result := gen.ScoreNACD200JSONResponse{}
+
+	for _, p := range packages.Packages {
+		name := p.Type + "_" + p.Namespaces[0].Namespace + "_" + p.Namespaces[0].Names[0].Name
+
+		criticality := scorer.Scorer(criticalityParams[name])
+		likelihood := scorer.Scorer(likelihoodParams[name])
+
+		risk, err := scorer.RiskCalculator(criticality, likelihood, float64(request.Body.CriticalityWeight), float64(request.Body.LikelihoodWeight))
+
+		if err != nil {
+			fmt.Errorf("failed to calculate risk: %v", err)
+		}
+
+		riskResponse := float32(*risk)
+		criticalityResponse := float32(criticality)
+		likelihoodResponse := float32(likelihood)
+		numDependentsResponse := numberOfDependentsValues[name]
+		scorecardResponse := float32(scorecardValues[name])
+
+		resp := gen.NACDScoreResponse{
+			{
+				PkgName:          &name,
+				RiskScore:        &riskResponse,
+				CriticalityScore: &criticalityResponse,
+				LikelihoodScore:  &likelihoodResponse,
+				Metrics: &struct {
+					NumberOfDependents *int     `json:"numberOfDependents,omitempty"`
+					ScorecardScore     *float32 `json:"scorecardScore,omitempty"`
+				}{
+					NumberOfDependents: &numDependentsResponse,
+					ScorecardScore:     &scorecardResponse,
+				},
+			},
+		}
+
+		result = append(result, resp...)
+	}
+
+	return result, nil
 }
 
 func (s *DefaultServer) AnalyzeDependencies(ctx context.Context, request gen.AnalyzeDependenciesRequestObject) (gen.AnalyzeDependenciesResponseObject, error) {

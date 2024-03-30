@@ -4,6 +4,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -96,6 +97,11 @@ type ClientInterface interface {
 
 	// RetrieveDependencies request
 	RetrieveDependencies(ctx context.Context, params *RetrieveDependenciesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ScoreNACDWithBody request with any body
+	ScoreNACDWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ScoreNACD(ctx context.Context, body ScoreNACDJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) AnalyzeDependencies(ctx context.Context, params *AnalyzeDependenciesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -124,6 +130,30 @@ func (c *Client) HealthCheck(ctx context.Context, reqEditors ...RequestEditorFn)
 
 func (c *Client) RetrieveDependencies(ctx context.Context, params *RetrieveDependenciesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRetrieveDependenciesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ScoreNACDWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScoreNACDRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ScoreNACD(ctx context.Context, body ScoreNACDJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScoreNACDRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +313,46 @@ func NewRetrieveDependenciesRequest(server string, params *RetrieveDependenciesP
 	return req, nil
 }
 
+// NewScoreNACDRequest calls the generic ScoreNACD builder with application/json body
+func NewScoreNACDRequest(server string, body ScoreNACDJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewScoreNACDRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewScoreNACDRequestWithBody generates requests for ScoreNACD with any type of body
+func NewScoreNACDRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/scoreNACD")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -334,6 +404,11 @@ type ClientWithResponsesInterface interface {
 
 	// RetrieveDependenciesWithResponse request
 	RetrieveDependenciesWithResponse(ctx context.Context, params *RetrieveDependenciesParams, reqEditors ...RequestEditorFn) (*RetrieveDependenciesResponse, error)
+
+	// ScoreNACDWithBodyWithResponse request with any body
+	ScoreNACDWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScoreNACDResponse, error)
+
+	ScoreNACDWithResponse(ctx context.Context, body ScoreNACDJSONRequestBody, reqEditors ...RequestEditorFn) (*ScoreNACDResponse, error)
 }
 
 type AnalyzeDependenciesResponse struct {
@@ -408,6 +483,30 @@ func (r RetrieveDependenciesResponse) StatusCode() int {
 	return 0
 }
 
+type ScoreNACDResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *NACDScoreResponse
+	JSON400      *BadRequest
+	JSON500      *InternalServerError
+}
+
+// Status returns HTTPResponse.Status
+func (r ScoreNACDResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ScoreNACDResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 // AnalyzeDependenciesWithResponse request returning *AnalyzeDependenciesResponse
 func (c *ClientWithResponses) AnalyzeDependenciesWithResponse(ctx context.Context, params *AnalyzeDependenciesParams, reqEditors ...RequestEditorFn) (*AnalyzeDependenciesResponse, error) {
 	rsp, err := c.AnalyzeDependencies(ctx, params, reqEditors...)
@@ -433,6 +532,23 @@ func (c *ClientWithResponses) RetrieveDependenciesWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseRetrieveDependenciesResponse(rsp)
+}
+
+// ScoreNACDWithBodyWithResponse request with arbitrary body returning *ScoreNACDResponse
+func (c *ClientWithResponses) ScoreNACDWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScoreNACDResponse, error) {
+	rsp, err := c.ScoreNACDWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseScoreNACDResponse(rsp)
+}
+
+func (c *ClientWithResponses) ScoreNACDWithResponse(ctx context.Context, body ScoreNACDJSONRequestBody, reqEditors ...RequestEditorFn) (*ScoreNACDResponse, error) {
+	rsp, err := c.ScoreNACD(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseScoreNACDResponse(rsp)
 }
 
 // ParseAnalyzeDependenciesResponse parses an HTTP response from a AnalyzeDependenciesWithResponse call
@@ -549,6 +665,46 @@ func ParseRetrieveDependenciesResponse(rsp *http.Response) (*RetrieveDependencie
 			return nil, err
 		}
 		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseScoreNACDResponse parses an HTTP response from a ScoreNACDWithResponse call
+func ParseScoreNACDResponse(rsp *http.Response) (*ScoreNACDResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ScoreNACDResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NACDScoreResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	}
 
