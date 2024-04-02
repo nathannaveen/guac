@@ -26,6 +26,11 @@ import (
 	gen "github.com/guacsec/guac/pkg/guacrest/generated"
 )
 
+const (
+	numberOfDependents = "numberOfDependents"
+	scorecard          = "scorecard"
+)
+
 // DefaultServer implements the API, backed by the GraphQL Server
 type DefaultServer struct {
 	gqlClient graphql.Client
@@ -40,6 +45,8 @@ func (s *DefaultServer) HealthCheck(ctx context.Context, request gen.HealthCheck
 }
 
 func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequestObject) (gen.ScoreNACDResponseObject, error) {
+	metricParams := make(map[string]scorer.ParameterValues)
+
 	likelihoodParams := make(map[string][]scorer.ParameterValues)
 	criticalityParams := make(map[string][]scorer.ParameterValues)
 
@@ -48,29 +55,47 @@ func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequ
 
 	if request.Body == nil {
 		// we know that the user didn't provide a JSON document, so we use our default document
+
+		data, err := scorer.ReadNACDInputFile("pkg/scorer/defaultInput.json")
+
+		if err != nil {
+			fmt.Errorf("error reading default input file, %v", err)
+		}
+
+		metricParams[numberOfDependents] = data.Criticality.NumberOfDependents
+		metricParams[scorecard] = data.Likelihood.Scorecard
 	} else {
 		// the user provided a JSON document
 
 		if request.Body.Criticality.NumberOfDependents != nil {
-			dependents, err := dependencies.GetDependenciesBySortedDependentCnt(ctx, s.gqlClient)
-
-			if err != nil {
-				fmt.Errorf("error getting dependencies: %v", err)
-			}
-
-			for _, pkg := range dependents {
-				p := scorer.ParameterValues{
-					Parameter: float64(pkg.DependentCount),
-					Weight:    float64(request.Body.Criticality.NumberOfDependents.Weight),
-					K:         float64(request.Body.Criticality.NumberOfDependents.K),
-					L:         float64(request.Body.Criticality.NumberOfDependents.L),
-				}
-				criticalityParams[pkg.Name] = append(criticalityParams[pkg.Name], p)
-				numberOfDependentsValues[pkg.Name] = pkg.DependentCount
+			metricParams[numberOfDependents] = scorer.ParameterValues{
+				Weight: float64(request.Body.Criticality.NumberOfDependents.Weight),
+				K:      float64(request.Body.Criticality.NumberOfDependents.K),
+				L:      float64(request.Body.Criticality.NumberOfDependents.L),
 			}
 		}
 
 		if request.Body.Likelihood.Scorecard != nil {
+			metricParams[scorecard] = scorer.ParameterValues{
+				Weight: float64(request.Body.Likelihood.Scorecard.Weight),
+				K:      float64(request.Body.Likelihood.Scorecard.K),
+				L:      float64(request.Body.Likelihood.Scorecard.L),
+			}
+		}
+	}
+
+	for _, metric := range []string{numberOfDependents, scorecard} {
+		if _, ok := metricParams[metric]; !ok {
+			continue
+		}
+
+		p := scorer.ParameterValues{
+			Weight: metricParams[metric].Weight,
+			K:      metricParams[metric].K,
+			L:      metricParams[metric].L,
+		}
+
+		if metric == "scorecard" {
 			scores, err := model.Scorecards(ctx, s.gqlClient, model.CertifyScorecardSpec{})
 
 			if err != nil {
@@ -80,15 +105,24 @@ func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequ
 			for _, scorecard := range scores.Scorecards {
 				name := scorecard.Source.Type + "_" + scorecard.Source.Namespaces[0].Namespace + "_" + scorecard.Source.Namespaces[0].Names[0].Name
 
-				p := scorer.ParameterValues{
-					Parameter: scorecard.Scorecard.AggregateScore,
-					Weight:    float64(request.Body.Likelihood.Scorecard.Weight),
-					K:         float64(request.Body.Likelihood.Scorecard.K),
-					L:         float64(request.Body.Likelihood.Scorecard.L),
-				}
+				p.Parameter = scorecard.Scorecard.AggregateScore
 				likelihoodParams[name] = append(likelihoodParams[name], p)
 				scorecardValues[name] = scorecard.Scorecard.AggregateScore
 			}
+		} else if metric == "numberOfDependents" {
+			dependents, err := dependencies.GetDependenciesBySortedDependentCnt(ctx, s.gqlClient)
+
+			if err != nil {
+				fmt.Errorf("error getting dependencies: %v", err)
+			}
+
+			for _, pkg := range dependents {
+				p.Parameter = float64(pkg.DependentCount)
+				criticalityParams[pkg.Name] = append(criticalityParams[pkg.Name], p)
+				numberOfDependentsValues[pkg.Name] = pkg.DependentCount
+			}
+		} else {
+			fmt.Errorf("unknown metric")
 		}
 	}
 

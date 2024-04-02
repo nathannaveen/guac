@@ -7,8 +7,10 @@ import (
 )
 
 type InputData struct {
-	Criticality Criticality `json:"criticality"`
-	Likelihood  Likelihood  `json:"likelihood"`
+	Criticality       Criticality `json:"criticality"`
+	CriticalityWeight float64     `json:"criticalityWeight"`
+	Likelihood        Likelihood  `json:"likelihood"`
+	LikelihoodWeight  float64     `json:"likelihoodWeight"`
 }
 
 type Criticality struct {
@@ -23,7 +25,7 @@ type Likelihood struct {
 
 type ParameterValues struct {
 	K         float64 `json:"k_value"`
-	Parameter float64 `json:"parameter"`
+	Parameter float64 `json:"-"` // This field will not be pulled from JSON
 	L         float64 `json:"l_value"`
 	Weight    float64 `json:"weight"`
 }
