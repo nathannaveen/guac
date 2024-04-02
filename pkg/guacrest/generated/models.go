@@ -18,26 +18,26 @@ type Error struct {
 type NACDScoreRequest struct {
 	Criticality struct {
 		NumberOfDependents *struct {
-			// K Coefficient for scaling the number of dependents.
-			K float32 `json:"k"`
+			// KValue Coefficient for scaling the number of dependents.
+			KValue float32 `json:"k_value"`
 
-			// L Offset for the number of dependents.
-			L float32 `json:"l"`
+			// LValue Offset for the number of dependents.
+			LValue float32 `json:"l_value"`
 
 			// Weight Weight of the number of dependents in the overall criticality score.
 			Weight float32 `json:"weight"`
-		} `json:"numberOfDependents,omitempty"`
+		} `json:"number_of_dependents,omitempty"`
 	} `json:"criticality"`
 
 	// CriticalityWeight Weight of the criticality in the overall score.
-	CriticalityWeight float32 `json:"criticalityWeight"`
+	CriticalityWeight float32 `json:"criticality_weight"`
 	Likelihood        struct {
 		Scorecard *struct {
-			// K Coefficient for scaling the scorecard score.
-			K float32 `json:"k"`
+			// KValue Coefficient for scaling the scorecard score.
+			KValue float32 `json:"k_value"`
 
-			// L Offset for the scorecard score.
-			L float32 `json:"l"`
+			// LValue Offset for the scorecard score.
+			LValue float32 `json:"l_value"`
 
 			// Weight Weight of the scorecard score in the overall likelihood score.
 			Weight float32 `json:"weight"`
@@ -45,31 +45,31 @@ type NACDScoreRequest struct {
 	} `json:"likelihood"`
 
 	// LikelihoodWeight Weight of the likelihood in the overall score.
-	LikelihoodWeight float32 `json:"likelihoodWeight"`
+	LikelihoodWeight float32 `json:"likelihood_weight"`
 }
 
 // NACDScoreResponse defines model for NACDScoreResponse.
 type NACDScoreResponse = []struct {
 	// CriticalityScore The criticality of a package.
-	CriticalityScore *float32 `json:"criticalityScore,omitempty"`
+	CriticalityScore *float32 `json:"criticality_score"`
 
 	// LikelihoodScore The likelihood of a package getting a vulnerability.
-	LikelihoodScore *float32 `json:"likelihoodScore,omitempty"`
+	LikelihoodScore *float32 `json:"likelihood_score"`
 
 	// Metrics Detailed metrics analysis.
 	Metrics *struct {
 		// NumberOfDependents Number of packages that depend on this package.
-		NumberOfDependents *int `json:"numberOfDependents,omitempty"`
+		NumberOfDependents *int `json:"number_of_dependents"`
 
 		// ScorecardScore The OpenSSF Scorecard score of this package.
-		ScorecardScore *float32 `json:"scorecardScore,omitempty"`
+		ScorecardScore *float32 `json:"scorecard_score"`
 	} `json:"metrics,omitempty"`
 
 	// PkgName Name of the package
 	PkgName *string `json:"pkgName,omitempty"`
 
 	// RiskScore The risk of a vulnerability of a package.
-	RiskScore *float32 `json:"riskScore,omitempty"`
+	RiskScore *float32 `json:"risk_score"`
 }
 
 // PackageName defines model for PackageName.

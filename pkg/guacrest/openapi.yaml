@@ -150,49 +150,49 @@ components:
     NACDScoreRequest:
       type: object
       required:
-        - criticalityWeight
-        - likelihoodWeight
+        - criticality_weight
+        - likelihood_weight
         - criticality
         - likelihood
       properties:
-        criticalityWeight:
+        criticality_weight:
           type: number
           description: Weight of the criticality in the overall score.
-        likelihoodWeight:
+        likelihood_weight:
           type: number
           description: Weight of the likelihood in the overall score.
         criticality:
           type: object
           properties:
-            numberOfDependents:
+            number_of_dependents:
               type: object
               properties:
-                k:
+                k_value:
                   type: number
                   description: Coefficient for scaling the number of dependents.
-                l:
+                l_value:
                   type: number
                   description: Offset for the number of dependents.
                 weight:
                   type: number
                   description: Weight of the number of dependents in the overall criticality score.
-              required: [k, l, weight] # These fields are required if numberOfDependents is provided
+              required: [k_value, l_value, weight] # These fields are required if numberOfDependents is provided
         likelihood:
           type: object
           properties:
             scorecard:
               type: object
               properties:
-                k:
+                k_value:
                   type: number
                   description: Coefficient for scaling the scorecard score.
-                l:
+                l_value:
                   type: number
                   description: Offset for the scorecard score.
                 weight:
                   type: number
                   description: Weight of the scorecard score in the overall likelihood score.
-              required: [k, l, weight] # These fields are required if scorecard is provided
+              required: [k_value, l_value, weight] # These fields are required if scorecard is provided
     NACDScoreResponse:
       type: array
       items:
@@ -201,24 +201,29 @@ components:
           pkgName:
             type: string
             description: Name of the package
-          criticalityScore:
+          criticality_score:
             type: number
+            nullable: true
             description: The criticality of a package.
-          likelihoodScore:
+          likelihood_score:
             type: number
+            nullable: true
             description: The likelihood of a package getting a vulnerability.
-          riskScore:
+          risk_score:
             type: number
+            nullable: true
             description: The risk of a vulnerability of a package.
           metrics:
             type: object
             description: Detailed metrics analysis.
             properties:
-              numberOfDependents:
+              number_of_dependents:
                 type: integer
+                nullable: true
                 description: Number of packages that depend on this package.
-              scorecardScore:
+              scorecard_score:
                 type: number
+                nullable: true
                 description: The OpenSSF Scorecard score of this package.
   responses:
     # for code 200

@@ -8,9 +8,9 @@ import (
 
 type InputData struct {
 	Criticality       Criticality `json:"criticality"`
-	CriticalityWeight float64     `json:"criticalityWeight"`
+	CriticalityWeight float64     `json:"criticality_weight"`
 	Likelihood        Likelihood  `json:"likelihood"`
-	LikelihoodWeight  float64     `json:"likelihoodWeight"`
+	LikelihoodWeight  float64     `json:"likelihood_weight"`
 }
 
 type Criticality struct {

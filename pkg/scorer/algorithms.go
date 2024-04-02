@@ -12,7 +12,7 @@ import (
 // It returns a pointer to the calculated risk value or an error if the sum of weights exceeds 1.
 func RiskCalculator(criticality, likelihood, criticalityWeight, likelihoodWeight float64) (*float64, error) {
 	if criticalityWeight+likelihoodWeight > 1 {
-		return nil, fmt.Errorf("criticalityWeight and likelihoodWeight must be lesser than or equal to 1")
+		return nil, fmt.Errorf("criticality_weight and likelihood_weight must be lesser than or equal to 1")
 	}
 
 	result := criticality*criticalityWeight + likelihood*likelihoodWeight
@@ -24,7 +24,7 @@ func RiskCalculator(criticality, likelihood, criticalityWeight, likelihoodWeight
 // This function implements a scoring algorithm as per the specifications in the "Weighting the Next Actionable Critical Dependency Proposal".
 // For more details, refer to: https://docs.google.com/document/d/1Xb86MrKFQZQNq9rCQb08Dk1b5HU7nzLHkzfjBvbndeM/edit?usp=sharing
 // It aggregates the weighted scores of individual parameters to compute a final score.
-func Scorer(params []ParameterValues) float64 {
+func Scorer(params []ParameterValues) (*float64, error) {
 	numeratorSum := float64(0)
 	totalSum := float64(0)
 
@@ -33,7 +33,12 @@ func Scorer(params []ParameterValues) float64 {
 		totalSum += params[i].Weight
 	}
 
-	return numeratorSum / totalSum
+	res := numeratorSum / totalSum
+
+	// res will sometimes be NAN because params are empty (making totalSum equal 0).
+	// This is mainly because we can't get all scorecard scores.
+
+	return &res, nil
 }
 
 // calculateNumerator computes the numerator part of the scoring equation for a single parameter.

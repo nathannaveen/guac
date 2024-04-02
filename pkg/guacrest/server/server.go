@@ -18,12 +18,14 @@ package server
 import (
 	"context"
 	"fmt"
-	model "github.com/guacsec/guac/pkg/assembler/clients/generated"
-	"github.com/guacsec/guac/pkg/scorer"
-
 	"github.com/Khan/genqlient/graphql"
+	model "github.com/guacsec/guac/pkg/assembler/clients/generated"
 	"github.com/guacsec/guac/pkg/dependencies"
 	gen "github.com/guacsec/guac/pkg/guacrest/generated"
+	"github.com/guacsec/guac/pkg/handler/collector/deps_dev"
+	"github.com/guacsec/guac/pkg/scorer"
+	"math"
+	"time"
 )
 
 const (
@@ -53,13 +55,21 @@ func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequ
 	scorecardValues := make(map[string]float64)
 	numberOfDependentsValues := make(map[string]int)
 
+	startTime := time.Now()
+
+	fmt.Printf("got input at: %v\n", time.Since(startTime))
+
 	if request.Body == nil {
 		// we know that the user didn't provide a JSON document, so we use our default document
 
 		data, err := scorer.ReadNACDInputFile("pkg/scorer/defaultInput.json")
 
 		if err != nil {
-			fmt.Errorf("error reading default input file, %v", err)
+			return gen.ScoreNACD500JSONResponse{
+				InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+					Message: fmt.Sprintf("error reading input file: %v", err.Error()),
+				},
+			}, nil
 		}
 
 		metricParams[numberOfDependents] = data.Criticality.NumberOfDependents
@@ -70,17 +80,29 @@ func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequ
 		if request.Body.Criticality.NumberOfDependents != nil {
 			metricParams[numberOfDependents] = scorer.ParameterValues{
 				Weight: float64(request.Body.Criticality.NumberOfDependents.Weight),
-				K:      float64(request.Body.Criticality.NumberOfDependents.K),
-				L:      float64(request.Body.Criticality.NumberOfDependents.L),
+				K:      float64(request.Body.Criticality.NumberOfDependents.KValue),
+				L:      float64(request.Body.Criticality.NumberOfDependents.LValue),
 			}
+		} else {
+			return gen.ScoreNACD500JSONResponse{
+				InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+					Message: fmt.Sprintf("number of dependents body is empty"),
+				},
+			}, nil
 		}
 
 		if request.Body.Likelihood.Scorecard != nil {
 			metricParams[scorecard] = scorer.ParameterValues{
 				Weight: float64(request.Body.Likelihood.Scorecard.Weight),
-				K:      float64(request.Body.Likelihood.Scorecard.K),
-				L:      float64(request.Body.Likelihood.Scorecard.L),
+				K:      float64(request.Body.Likelihood.Scorecard.KValue),
+				L:      float64(request.Body.Likelihood.Scorecard.LValue),
 			}
+		} else {
+			return gen.ScoreNACD500JSONResponse{
+				InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+					Message: fmt.Sprintf("scorecard body is empty"),
+				},
+			}, nil
 		}
 	}
 
@@ -99,21 +121,41 @@ func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequ
 			scores, err := model.Scorecards(ctx, s.gqlClient, model.CertifyScorecardSpec{})
 
 			if err != nil {
-				fmt.Println(err)
+				return gen.ScoreNACD500JSONResponse{
+					InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+						Message: fmt.Sprintf("error getting s scores: %v", err.Error()),
+					},
+				}, nil
 			}
 
-			for _, scorecard := range scores.Scorecards {
-				name := scorecard.Source.Type + "_" + scorecard.Source.Namespaces[0].Namespace + "_" + scorecard.Source.Namespaces[0].Names[0].Name
+			for _, s := range scores.Scorecards {
+				name := s.Source.Type + "_" + s.Source.Namespaces[0].Namespace + "_" + s.Source.Namespaces[0].Names[0].Name
 
-				p.Parameter = scorecard.Scorecard.AggregateScore
-				likelihoodParams[name] = append(likelihoodParams[name], p)
-				scorecardValues[name] = scorecard.Scorecard.AggregateScore
+				p2 := scorer.ParameterValues{
+					Weight: metricParams[metric].Weight,
+					K:      metricParams[metric].K,
+					L:      metricParams[metric].L,
+				}
+
+				p2.Parameter = s.Scorecard.AggregateScore
+				likelihoodParams[name] = append(likelihoodParams[name], p2)
+				scorecardValues[name] = s.Scorecard.AggregateScore
+				fmt.Println("scorecard score: ", s.Scorecard.AggregateScore)
 			}
+
+			fmt.Println("total scorecard scores:", scorecardValues)
+
 		} else if metric == "numberOfDependents" {
 			dependents, err := dependencies.GetDependenciesBySortedDependentCnt(ctx, s.gqlClient)
 
+			fmt.Println("len dependents: ", len(dependents))
+
 			if err != nil {
-				fmt.Errorf("error getting dependencies: %v", err)
+				return gen.ScoreNACD500JSONResponse{
+					InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+						Message: fmt.Sprintf("error getting dependencies: %v", err.Error()),
+					},
+				}, nil
 			}
 
 			for _, pkg := range dependents {
@@ -122,52 +164,101 @@ func (s *DefaultServer) ScoreNACD(ctx context.Context, request gen.ScoreNACDRequ
 				numberOfDependentsValues[pkg.Name] = pkg.DependentCount
 			}
 		} else {
-			fmt.Errorf("unknown metric")
+			return gen.ScoreNACD400JSONResponse{
+				BadRequestJSONResponse: gen.BadRequestJSONResponse{
+					Message: fmt.Sprintf("unknown metric"),
+				},
+			}, nil
 		}
-	}
-
-	packages, err := model.Packages(ctx, s.gqlClient, model.PkgSpec{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get packages: %v", err)
 	}
 
 	result := gen.ScoreNACD200JSONResponse{}
 
-	for _, p := range packages.Packages {
-		name := p.Type + "_" + p.Namespaces[0].Namespace + "_" + p.Namespaces[0].Names[0].Name
+	sboms, err := model.HasSBOMs(ctx, s.gqlClient, model.HasSBOMSpec{})
 
-		criticality := scorer.Scorer(criticalityParams[name])
-		likelihood := scorer.Scorer(likelihoodParams[name])
+	fmt.Println(len(sboms.HasSBOM))
 
-		risk, err := scorer.RiskCalculator(criticality, likelihood, float64(request.Body.CriticalityWeight), float64(request.Body.LikelihoodWeight))
+	if err != nil {
+		return nil, fmt.Errorf("error getting dependencies: %v", err)
+	}
 
-		if err != nil {
-			fmt.Errorf("failed to calculate risk: %v", err)
+	for _, resp := range sboms.HasSBOM {
+		// Skip entries from "deps.dev" because they are inconsistent.
+		if resp.Origin == deps_dev.DepsCollector {
+			continue
 		}
+		// Iterate through the included dependencies of each SBOM.
+		for _, dependency := range resp.IncludedDependencies {
+			// TODO: Make the names actually unique, not just add "_".
+			name := dependency.Package.Type + "_" + dependency.Package.Namespaces[0].Namespace + "_" + dependency.Package.Namespaces[0].Names[0].Name
 
-		riskResponse := float32(*risk)
-		criticalityResponse := float32(criticality)
-		likelihoodResponse := float32(likelihood)
-		numDependentsResponse := numberOfDependentsValues[name]
-		scorecardResponse := float32(scorecardValues[name])
+			//fmt.Println("name:", name)
 
-		resp := gen.NACDScoreResponse{
-			{
-				PkgName:          &name,
-				RiskScore:        &riskResponse,
-				CriticalityScore: &criticalityResponse,
-				LikelihoodScore:  &likelihoodResponse,
-				Metrics: &struct {
-					NumberOfDependents *int     `json:"numberOfDependents,omitempty"`
-					ScorecardScore     *float32 `json:"scorecardScore,omitempty"`
-				}{
-					NumberOfDependents: &numDependentsResponse,
-					ScorecardScore:     &scorecardResponse,
+			criticality, err := scorer.Scorer(criticalityParams[name])
+
+			if err != nil {
+				return gen.ScoreNACD500JSONResponse{
+					InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+						Message: fmt.Sprintf("error scoring criticality: %v", err.Error()),
+					},
+				}, nil
+			}
+
+			likelihood, err := scorer.Scorer(likelihoodParams[name])
+
+			if err != nil {
+				return gen.ScoreNACD500JSONResponse{
+					InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+						Message: fmt.Sprintf("error scoring liklihood: %v", err.Error()),
+					},
+				}, nil
+			}
+
+			risk, err := scorer.RiskCalculator(*criticality, *likelihood, float64(request.Body.CriticalityWeight), float64(request.Body.LikelihoodWeight))
+
+			if err != nil {
+				return gen.ScoreNACD500JSONResponse{
+					InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+						Message: fmt.Sprintf("error calculating risk: %v", err.Error()),
+					},
+				}, nil
+			}
+
+			resp := gen.NACDScoreResponse{
+				{
+					PkgName: &name,
+					Metrics: &struct {
+						NumberOfDependents *int     `json:"number_of_dependents"`
+						ScorecardScore     *float32 `json:"scorecard_score"`
+					}{},
 				},
-			},
-		}
+			}
 
-		result = append(result, resp...)
+			if !math.IsNaN(*risk) {
+				riskResponse := float32(*risk)
+				resp[0].RiskScore = &riskResponse
+			}
+			if !math.IsNaN(*likelihood) {
+				likelihoodResponse := float32(*likelihood)
+				resp[0].LikelihoodScore = &likelihoodResponse
+			}
+			if !math.IsNaN(*criticality) {
+				criticalityResponse := float32(*criticality)
+				resp[0].CriticalityScore = &criticalityResponse
+			}
+			if _, ok := numberOfDependentsValues[name]; ok {
+				numDependentsResponse := numberOfDependentsValues[name]
+				resp[0].Metrics.NumberOfDependents = &numDependentsResponse
+			}
+			if _, ok := scorecardValues[name]; ok {
+				scorecardResponse := float32(scorecardValues[name])
+				resp[0].Metrics.ScorecardScore = &scorecardResponse
+			}
+
+			if !math.IsNaN(*likelihood) || scorecardValues[name] != 0 {
+				result = append(result, resp...)
+			}
+		}
 	}
 
 	return result, nil

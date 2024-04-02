@@ -1,4 +1,6 @@
 {
+  "criticality_weight": 0.7,
+  "likelihood_weight": 0.3,
   "criticality": {
     "number_of_dependents": {
       "k_value": 0.5,
