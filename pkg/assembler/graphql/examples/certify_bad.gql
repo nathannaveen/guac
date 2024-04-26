@@ -50,6 +50,12 @@ fragment allCertifyBadTree on CertifyBad {
   documentRef
 }
 
+query certifyBadPagination {
+  CertifyBadList(certifyBadSpec: {}, first: 10) {
+    ...AllPaginationTree
+  }
+}
+
 query CertifactBadQ1 {
   CertifyBad(certifyBadSpec: {}) {
     ...allCertifyBadTree

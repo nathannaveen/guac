@@ -181,7 +181,6 @@ func (c *demoClient) ScorecardsList(ctx context.Context, scorecardSpec model.Cer
 
 	edges := make([]*model.CertifyScorecardEdge, 0)
 	hasNextPage := false
-	var cscKeys []string
 	numNodes := 0
 	totalCount := 0
 
@@ -229,6 +228,8 @@ func (c *demoClient) ScorecardsList(ctx context.Context, scorecardSpec model.Cer
 		var done bool
 		for !done {
 			var err error
+			var cscKeys []string
+
 			cscKeys, done, err = scn.Scan(ctx)
 			if err != nil {
 				return nil, err

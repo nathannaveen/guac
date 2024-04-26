@@ -33,6 +33,12 @@ fragment allCertifyScorecardTree on CertifyScorecard {
   }
 }
 
+query scorecardPagination {
+  scorecardsList(scorecardSpec: {}, first: 10) {
+    ...AllPaginationTree
+  }
+}
+
 query ScorecardQ1 {
   scorecards(scorecardSpec: {}) {
     ...allCertifyScorecardTree
