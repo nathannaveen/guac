@@ -33,9 +33,24 @@ fragment allCertifyScorecardTree on CertifyScorecard {
   }
 }
 
+fragment allCertifyScorecardPaginationTree on CertifyScorecardConnection {
+  totalCount
+  edges {
+    cursor
+    node {
+      id
+    }
+  }
+  pageInfo {
+    startCursor
+    endCursor
+    hasNextPage
+  }
+}
+
 query scorecardPagination {
   scorecardsList(scorecardSpec: {}, first: 10) {
-    ...AllPaginationTree
+    ...allCertifyScorecardPaginationTree
   }
 }
 

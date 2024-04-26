@@ -50,9 +50,24 @@ fragment allCertifyBadTree on CertifyBad {
   documentRef
 }
 
+fragment allCertifyBadPaginationTree on CertifyBadConnection {
+  totalCount
+  edges {
+    cursor
+    node {
+      id
+    }
+  }
+  pageInfo {
+    startCursor
+    endCursor
+    hasNextPage
+  }
+}
+
 query certifyBadPagination {
   CertifyBadList(certifyBadSpec: {}, first: 10) {
-    ...AllPaginationTree
+    ...allCertifyBadPaginationTree
   }
 }
 

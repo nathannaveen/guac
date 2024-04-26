@@ -4,12 +4,12 @@ fragment allArtifactTree on Artifact {
   digest
 }
 
-fragment AllPaginationTree on CertifyScorecardConnection {
+fragment allArtifactPaginationTree on ArtifactConnection {
   totalCount
   edges {
     cursor
     node {
-      ...allArtifactTree
+      id
     }
   }
   pageInfo {
@@ -28,7 +28,7 @@ query ArtifactQ1 {
 
 query ArtifactPagination {
   artifactsList(artifactSpec: {}, first: 10) {
-    ...AllPaginationTree
+    ...allArtifactPaginationTree
   }
 }
 
