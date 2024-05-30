@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	pb "deps.dev/api/v3"
+	pb "deps.dev/api/v3alpha"
 	"github.com/google/go-cmp/cmp"
 	"github.com/guacsec/guac/internal/testing/dochelper"
 	"github.com/guacsec/guac/internal/testing/testdata"
@@ -275,7 +275,7 @@ func Test_depsCollector_RetrieveArtifacts(t *testing.T) {
 				}
 				result := dochelper.DocTreeEqual(dochelper.DocNode(collectedDocs[i]), dochelper.DocNode(tt.want[i]))
 				if !result {
-					t.Errorf("Failed to match expected result: %s and the diff is %s", tt.name, cmp.Diff(dochelper.DocNode(collectedDocs[i]), dochelper.DocNode(tt.want[i])))
+					t.Errorf("Failed to match expected result: %s and the diff is %s", tt.name, cmp.Diff(dochelper.DocNode(tt.want[i]), dochelper.DocNode(collectedDocs[i])))
 				}
 			}
 		})

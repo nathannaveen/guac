@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	pb "deps.dev/api/v3"
+	pb "deps.dev/api/v3alpha"
 	model "github.com/guacsec/guac/pkg/assembler/clients/generated"
 	"github.com/guacsec/guac/pkg/assembler/helpers"
 	"github.com/guacsec/guac/pkg/collectsub/datasource"
@@ -395,9 +395,31 @@ func (d *depsCollector) fetchDependencies(ctx context.Context, purl string, docC
 	logger := logging.FromContext(ctx)
 	component := &PackageComponent{}
 
-	// check if top level purl has already been queried
+	// Check if top level purl has already been queried
 	if _, ok := d.checkedPurls[purl]; ok {
 		logger.Infof("purl %s already queried", purl)
+		return nil
+	}
+
+	// Use PurlLookup to get the package or version
+	purlReq := &pb.PurlLookupRequest{
+		Purl: purl,
+	}
+	purlResp, err := d.client.PurlLookup(ctx, purlReq)
+	if err != nil {
+		logger.Infof("failed to lookup purl: %s, error: %v", purl, err)
+		return nil
+	}
+
+	var versionKey *pb.VersionKey
+	if purlResp.Version != nil {
+		versionKey = purlResp.Version.VersionKey
+	} else if purlResp.Package != nil {
+		// Handle the case where the result is a package without a version
+		logger.Infof("purl %s is a package without a version", purl)
+		return nil
+	} else {
+		logger.Infof("no valid result found for purl: %s", purl)
 		return nil
 	}
 
@@ -420,32 +442,17 @@ func (d *depsCollector) fetchDependencies(ctx context.Context, purl string, docC
 		logger.Debugf("failed to get additional metadata for package: %s, err: %v", purl, err)
 	}
 
-	// Make an RPC Request. The returned result is a stream of
-	// DependenciesResponse structs.
-	versionKey, err := getVersionKey(packageInput.Type, packageInput.Namespace, packageInput.Name, packageInput.Version)
-	if err != nil {
-		logger.Infof("failed to getVersionKey with the following error: %v", err)
-		return nil
-	}
-
+	// Fetch dependencies using the VersionKey
 	dependenciesReq := &pb.GetDependenciesRequest{
 		VersionKey: versionKey,
 	}
-	var deps *pb.Dependencies
-	if _, ok := d.dependencies[versionKey.String()]; ok {
-		deps = d.dependencies[versionKey.String()]
-	} else {
-		logger.Debugf("The version key was not found in the map: %v", versionKey)
-		deps, err = d.client.GetDependencies(ctx, dependenciesReq)
-		if err != nil {
-			logger.Debugf("failed to get dependencies: %v", err)
-			return nil
-		}
-		logger.Infof("Retrieved dependencies for %s", purl)
-		d.dependencies[versionKey.String()] = deps
+	deps, err := d.client.GetDependencies(ctx, dependenciesReq)
+	if err != nil {
+		logger.Infof("failed to get dependencies for version key: %v, error: %v", versionKey, err)
+		return nil
 	}
 
-	dependencyNodes := []*PackageComponent{}
+	var dependencyNodes []*PackageComponent
 
 	// append the i=0 node as the root node of the graph
 	dependencyNodes = append(dependencyNodes, component)
