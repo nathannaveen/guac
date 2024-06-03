@@ -560,6 +560,7 @@ func (d *depsCollector) collectAdditionalMetadata(ctx context.Context, pkgType s
 		}
 	}
 
+	var projectKeys []*pb.ProjectKey
 	for _, link := range versionResponse.Links {
 		if link.Label == sourceRepo {
 			src, err := helpers.VcsToSrc(link.Url)
@@ -577,38 +578,36 @@ func (d *depsCollector) collectAdditionalMetadata(ctx context.Context, pkgType s
 				d.ingestedSource[purlWithoutVersion] = src
 			}
 
-			projectReq := &pb.GetProjectRequest{
-				ProjectKey: &pb.ProjectKey{
-					Id: strings.TrimSuffix(src.Namespace, "/") + "/" + src.Name,
-				},
+			projectKey := &pb.ProjectKey{
+				Id: strings.TrimSuffix(src.Namespace, "/") + "/" + src.Name,
 			}
-			var project *pb.Project
-			if _, ok := d.projectInfoMap[projectReq.ProjectKey.String()]; ok {
-				project = d.projectInfoMap[projectReq.ProjectKey.String()]
-			} else {
-				logger.Debugf("The project key was not found in the map: %v", projectReq.ProjectKey)
-				project, err = d.client.GetProject(ctx, projectReq)
-				if err != nil {
-					logger.Debugf("unable to get project for: %v, error: %v", projectReq.ProjectKey.Id, err)
-					continue
+			projectKeys = append(projectKeys, projectKey)
+		}
+	}
+
+	projects, err := d.fetchProjectBatch(ctx, projectKeys)
+	if err != nil {
+		logger.Debugf("failed to fetch project batch: %v", err)
+		return err
+	}
+
+	for _, project := range projects {
+		if project.Scorecard != nil {
+			pkgComponent.Scorecard = &model.ScorecardInputSpec{}
+			pkgComponent.Scorecard.AggregateScore = float64(project.Scorecard.OverallScore)
+			pkgComponent.Scorecard.ScorecardCommit = project.Scorecard.Scorecard.Commit
+			pkgComponent.Scorecard.ScorecardVersion = project.Scorecard.Scorecard.Version
+			pkgComponent.Scorecard.TimeScanned = project.Scorecard.Date.AsTime().UTC()
+			var inputChecks []model.ScorecardCheckInputSpec
+
+			for _, check := range project.Scorecard.Checks {
+				inputCheck := model.ScorecardCheckInputSpec{
+					Check: check.Name,
+					Score: int(check.Score),
 				}
+				inputChecks = append(inputChecks, inputCheck)
 			}
-			if project.Scorecard != nil {
-				pkgComponent.Scorecard = &model.ScorecardInputSpec{}
-				pkgComponent.Scorecard.AggregateScore = float64(project.Scorecard.OverallScore)
-				pkgComponent.Scorecard.ScorecardCommit = project.Scorecard.Scorecard.Commit
-				pkgComponent.Scorecard.ScorecardVersion = project.Scorecard.Scorecard.Version
-				pkgComponent.Scorecard.TimeScanned = project.Scorecard.Date.AsTime().UTC()
-				inputChecks := []model.ScorecardCheckInputSpec{}
-				for _, check := range project.Scorecard.Checks {
-					inputCheck := model.ScorecardCheckInputSpec{
-						Check: check.Name,
-						Score: int(check.Score),
-					}
-					inputChecks = append(inputChecks, inputCheck)
-				}
-				pkgComponent.Scorecard.Checks = inputChecks
-			}
+			pkgComponent.Scorecard.Checks = inputChecks
 		}
 	}
 
@@ -616,6 +615,46 @@ func (d *depsCollector) collectAdditionalMetadata(ctx context.Context, pkgType s
 	pkgComponent.UpdateTime = time.Now().UTC()
 
 	return nil
+}
+
+func (d *depsCollector) fetchProjectBatch(ctx context.Context, projectKeys []*pb.ProjectKey) ([]*pb.Project, error) {
+	batchReq := &pb.GetProjectBatchRequest{
+		Requests: make([]*pb.GetProjectRequest, len(projectKeys)),
+	}
+	for i, key := range projectKeys {
+		batchReq.Requests[i] = &pb.GetProjectRequest{ProjectKey: key}
+	}
+
+	batchResp, err := d.client.GetProjectBatch(ctx, batchReq)
+	if err != nil {
+		return nil, err
+	}
+
+	projects := make([]*pb.Project, len(batchResp.Responses))
+	for i, resp := range batchResp.Responses {
+		projects[i] = resp.Project
+	}
+	return projects, nil
+}
+
+func (d *depsCollector) fetchVersionBatch(ctx context.Context, versionKeys []*pb.VersionKey) ([]*pb.Version, error) {
+	batchReq := &pb.GetVersionBatchRequest{
+		Requests: make([]*pb.GetVersionRequest, len(versionKeys)),
+	}
+	for i, key := range versionKeys {
+		batchReq.Requests[i] = &pb.GetVersionRequest{VersionKey: key}
+	}
+
+	batchResp, err := d.client.GetVersionBatch(ctx, batchReq)
+	if err != nil {
+		return nil, err
+	}
+
+	versions := make([]*pb.Version, len(batchResp.Responses))
+	for i, resp := range batchResp.Responses {
+		versions[i] = resp.Version
+	}
+	return versions, nil
 }
 
 func getVersionKey(pkgType string, namespace *string, name string, version *string) (*pb.VersionKey, error) {
