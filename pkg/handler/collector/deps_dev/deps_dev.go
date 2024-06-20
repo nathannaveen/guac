@@ -82,6 +82,14 @@ type depsCollector struct {
 
 var registerOnce sync.Once
 
+var depsDevSupportedPkgTypes = map[string]bool{
+	"golang": true,
+	"cargo":  true,
+	"maven":  true,
+	"npm":    true,
+	"nuget":  true,
+}
+
 func NewDepsCollector(ctx context.Context, collectDataSource datasource.CollectSource, poll, retrieveDependencies bool, interval time.Duration) (*depsCollector, error) {
 	ctx = metrics.WithMetrics(ctx, prometheusPrefix)
 	// Get the system certificates.
@@ -163,11 +171,10 @@ func (d *depsCollector) populatePurls(ctx context.Context, docChannel chan<- *pr
 	if err != nil {
 		return fmt.Errorf("failed to get all dependencies: %w", err)
 	}
-	for _, purl := range ds.PurlDataSources {
-		err := d.fetchDependencies(ctx, purl.Value, docChannel)
-		if err != nil {
-			return fmt.Errorf("failed to fetch dependencies: %w", err)
-		}
+
+	err = d.fetchDependencies(ctx, ds.PurlDataSources, docChannel)
+	if err != nil {
+		return fmt.Errorf("failed to fetch dependencies: %w", err)
 	}
 	return nil
 }
@@ -259,16 +266,30 @@ func (d *depsCollector) retrieveVersionsAndProjects(ctx context.Context, version
 func (d *depsCollector) collectMetadata(ctx context.Context, docChannel chan<- *processor.Document, purls map[string]*model.PkgInputSpec) {
 	logger := logging.FromContext(ctx)
 
-	for purl, packageInput := range purls {
-		component := &PackageComponent{}
-		component.CurrentPackage = packageInput
+	var batchRequests []*pb.PurlLookupRequest
 
-		err := d.collectAdditionalMetadata(ctx, packageInput.Type, packageInput.Namespace, packageInput.Name, packageInput.Version, component)
-		if err != nil {
-			logger.Debugf("failed to get additional metadata for package: %s, err: %v", purl, err)
-			continue
-		}
+	// Collect purls for batch request
+	for purl := range purls {
+		batchRequests = append(batchRequests, &pb.PurlLookupRequest{Purl: purl})
+	}
 
+	// Create batch request
+	batchReq := &pb.PurlLookupBatchRequest{
+		Requests: batchRequests,
+	}
+
+	// Send batch request
+	batchResp, err := d.client.PurlLookupBatch(ctx, batchReq)
+	if err != nil {
+		logger.Infof("failed to lookup purls in batch: %v", err)
+	}
+
+	purlToComponents, err := d.collectAdditionalMetadata(ctx, batchResp.Responses)
+	if err != nil {
+		logger.Debugf("failed to get additional metadata for package, err: %v", err)
+	}
+
+	for purl, component := range purlToComponents {
 		logger.Infof("obtained additional metadata for package: %s", purl)
 		d.checkedPurls[purl] = component
 
@@ -391,79 +412,161 @@ func (d *depsCollector) getAllDependencies(ctx context.Context, purls []datasour
 	return nil
 }
 
-func (d *depsCollector) fetchDependencies(ctx context.Context, purl string, docChannel chan<- *processor.Document) error {
+func (d *depsCollector) fetchDependencies(ctx context.Context, purls []datasource.Source, docChannel chan<- *processor.Document) error {
 	logger := logging.FromContext(ctx)
-	component := &PackageComponent{}
 
-	// Check if top level purl has already been queried
-	if _, ok := d.checkedPurls[purl]; ok {
-		logger.Infof("purl %s already queried", purl)
-		return nil
+	var batchRequests []*pb.PurlLookupRequest
+
+	// Collect purls for batch request
+	for _, purl := range purls {
+		if _, ok := d.checkedPurls[purl.Value]; ok {
+			logger.Infof("purl %s already queried", purl)
+			continue
+		}
+
+		if len(purl.Value) < 4 {
+			logger.Infof("purl values: %v", purl.Value)
+		}
+		pkgValues := strings.Split(purl.Value[4:], "/") // remove the starting "pkg:"
+
+		if len(pkgValues) == 0 {
+			logger.Infof("pkg values: %v", pkgValues)
+		}
+		pkgType := pkgValues[0]
+
+		if _, ok := depsDevSupportedPkgTypes[pkgType]; ok { // only add if deps dev supports the type of the package
+			batchRequests = append(batchRequests, &pb.PurlLookupRequest{Purl: purl.Value})
+
+			//_, err := d.client.PurlLookup(ctx, &pb.PurlLookupRequest{Purl: purl.Value})
+			//if err != nil {
+			//	logger.Infof("failed to lookup purl %s: %v", purl.Value, err)
+			//} else {
+			//	logger.Infof("FOUND PURL %s", purl.Value)
+			//}
+		}
 	}
 
-	// Use PurlLookup to get the package or version
-	purlReq := &pb.PurlLookupRequest{
-		Purl: purl,
+	// Create batch request
+	batchReq := &pb.PurlLookupBatchRequest{
+		Requests: batchRequests,
 	}
-	purlResp, err := d.client.PurlLookup(ctx, purlReq)
+
+	// Send batch request
+	batchResp, err := d.client.PurlLookupBatch(ctx, batchReq)
 	if err != nil {
-		logger.Infof("failed to lookup purl: %s, error: %v", purl, err)
-		return nil
+		logger.Infof("failed to lookup purls in batch: %v", err)
+		//return err
 	}
 
-	var versionKey *pb.VersionKey
-	if purlResp.Version != nil {
-		versionKey = purlResp.Version.VersionKey
-	} else if purlResp.Package != nil {
-		// Handle the case where the result is a package without a version
-		logger.Infof("purl %s is a package without a version", purl)
-		return nil
-	} else {
-		logger.Infof("no valid result found for purl: %s", purl)
-		return nil
+	logger.Infof("batch response: %v", batchResp)
+
+	components, err := d.collectAdditionalMetadata(ctx, batchResp.Responses)
+	if err != nil {
+		logger.Infof("failed to collect additional metadata: %v", err)
+		return err
 	}
+
+	for purl, component := range components {
+		packageInput, err := helpers.PurlToPkg(purl)
+		if err != nil {
+			logger.Infof("failed to parse purl to pkg: %s", purl)
+			return nil
+		}
+
+		// if version is not specified, cannot obtain accurate information from deps.dev. Log as info and skip the purl.
+		if *packageInput.Version == "" {
+			logger.Infof("purl does not contain version, skipping deps.dev query: %s", purl)
+			return nil
+		}
+
+		dependencyNodes, deps, err := d.fetchComponentDependencies(ctx, purl)
+
+		// append the i=0 node as the root node of the graph
+		dependencyNodes = append([]*PackageComponent{component}, dependencyNodes...)
+
+		component.DepPackages = append(component.DepPackages, dependencyNodes[1:]...)
+
+		for _, edge := range deps.Edges {
+			isDep := &model.IsDependencyInputSpec{
+				VersionRange:   edge.Requirement,
+				DependencyType: model.DependencyTypeDirect,
+				Justification:  "dependency data collected via deps.dev",
+			}
+			foundDepPackage := &IsDepPackage{
+				CurrentPackageInput: dependencyNodes[edge.FromNode].CurrentPackage,
+				DepPackageInput:     dependencyNodes[edge.ToNode].CurrentPackage,
+				IsDependency:        isDep,
+			}
+			component.IsDepPackages = append(component.IsDepPackages, foundDepPackage)
+		}
+
+		logger.Infof("obtained additional metadata for package: %s", purl)
+
+		d.checkedPurls[purl] = component
+
+		blob, err := json.Marshal(component)
+		if err != nil {
+			return err
+		}
+
+		doc := &processor.Document{
+			Blob:   blob,
+			Type:   processor.DocumentDepsDev,
+			Format: processor.FormatJSON,
+			SourceInformation: processor.SourceInformation{
+				Collector:   DepsCollector,
+				Source:      DepsCollector,
+				DocumentRef: events.GetDocRef(blob),
+			},
+		}
+		docChannel <- doc
+	}
+
+	return nil
+}
+
+func (d *depsCollector) fetchComponentDependencies(ctx context.Context, purl string) ([]*PackageComponent, *pb.Dependencies, error) {
+	logger := logging.FromContext(ctx)
 
 	packageInput, err := helpers.PurlToPkg(purl)
 	if err != nil {
 		logger.Infof("failed to parse purl to pkg: %s", purl)
-		return nil
+		return nil, nil, fmt.Errorf("failed to parse purl to pkg: %s", purl)
 	}
 
 	// if version is not specified, cannot obtain accurate information from deps.dev. Log as info and skip the purl.
 	if *packageInput.Version == "" {
 		logger.Infof("purl does not contain version, skipping deps.dev query: %s", purl)
-		return nil
+		return nil, nil, fmt.Errorf("purl does not contain version, skipping deps.dev query: %s", purl)
 	}
 
-	component.CurrentPackage = packageInput
-
-	err = d.collectAdditionalMetadata(ctx, packageInput.Type, packageInput.Namespace, packageInput.Name, packageInput.Version, component)
+	versionKey, err := getVersionKey(packageInput.Type, packageInput.Namespace, packageInput.Name, packageInput.Version)
 	if err != nil {
-		logger.Debugf("failed to get additional metadata for package: %s, err: %v", purl, err)
+		logger.Infof("failed to getVersionKey with the following error: %v", err)
+		return nil, nil, fmt.Errorf("failed to getVersionKey with the following error: %v", err)
 	}
 
-	// Fetch dependencies using the VersionKey
+	// Create a request to fetch dependencies
 	dependenciesReq := &pb.GetDependenciesRequest{
 		VersionKey: versionKey,
 	}
+
+	// Fetch dependencies
 	deps, err := d.client.GetDependencies(ctx, dependenciesReq)
 	if err != nil {
-		logger.Infof("failed to get dependencies for version key: %v, error: %v", versionKey, err)
-		return nil
+		logger.Infof("failed to get dependencies for version key: %v, error: %v", dependenciesReq.VersionKey, err)
+		return nil, nil, fmt.Errorf("failed to get dependencies for version key: %v, error: %v", dependenciesReq.VersionKey, err)
 	}
 
 	var dependencyNodes []*PackageComponent
 
-	// append the i=0 node as the root node of the graph
-	dependencyNodes = append(dependencyNodes, component)
+	var batchRequests []*pb.PurlLookupRequest
 
 	for i, node := range deps.Nodes {
-		// the nodes of the dependency graph. The first node is the root of the graph, which is captured above so skip.
+		// Skip the root node
 		if i == 0 {
 			continue
 		}
-
-		depComponent := &PackageComponent{}
 
 		pkgtype := ""
 		if node.VersionKey.System.String() == goUpperCase {
@@ -473,131 +576,195 @@ func (d *depsCollector) fetchDependencies(ctx context.Context, purl string, docC
 		}
 
 		depPurl := "pkg:" + pkgtype + "/" + node.VersionKey.Name + "@" + node.VersionKey.Version
-		depPackageInput, err := helpers.PurlToPkg(depPurl)
-		if err != nil {
-			logger.Infof("unable to parse purl: %v, error: %v", depPurl, err)
-			continue
-		}
-		// check if dependent package purl has already been queried. If found, append to the list of dependent packages for top level package
+
+		// Check if dependent package purl has already been queried
 		if foundDepVal, ok := d.checkedPurls[depPurl]; ok {
-			// if found, return the source as nothing as it has already been ingested once
+			// If found, return the source as nothing as it has already been ingested once
 			foundDepVal.Source = nil
-			logger.Debugf("dependant package purl %s already queried", depPurl)
+			logger.Debugf("dependent package purl %s already queried", depPurl)
 
 			dependencyNodes = append(dependencyNodes, foundDepVal)
 			continue
 		}
-		depComponent.CurrentPackage = depPackageInput
-		err = d.collectAdditionalMetadata(ctx, depPackageInput.Type, depPackageInput.Namespace, depPackageInput.Name, depPackageInput.Version, depComponent)
-		if err != nil {
-			logger.Debugf("failed to get additional metadata for package: %s, err: %v", depPurl, err)
-		}
+
+		batchRequests = append(batchRequests, &pb.PurlLookupRequest{Purl: depPurl})
+	}
+
+	// Create batch request
+	batchReq := &pb.PurlLookupBatchRequest{
+		Requests: batchRequests,
+	}
+
+	// Send batch request
+	purlBatchResp, err := d.client.PurlLookupBatch(ctx, batchReq)
+	if err != nil {
+		logger.Infof("failed to lookup purls in batch: %v", err)
+		return nil, nil, fmt.Errorf("failed to lookup purls in batch: %v", err)
+	}
+
+	components, err := d.collectAdditionalMetadata(ctx, purlBatchResp.Responses)
+	if err != nil {
+		logger.Debugf("failed to get additional metadata for packages, err: %v", err)
+	}
+
+	for depPurl, depComponent := range components {
 		dependencyNodes = append(dependencyNodes, depComponent)
 		d.checkedPurls[depPurl] = depComponent
 	}
 
-	component.DepPackages = append(component.DepPackages, dependencyNodes[1:]...)
-
-	for _, edge := range deps.Edges {
-		isDep := &model.IsDependencyInputSpec{
-			VersionRange:   edge.Requirement,
-			DependencyType: model.DependencyTypeDirect,
-			Justification:  "dependency data collected via deps.dev",
-		}
-		foundDepPackage := &IsDepPackage{
-			CurrentPackageInput: dependencyNodes[edge.FromNode].CurrentPackage,
-			DepPackageInput:     dependencyNodes[edge.ToNode].CurrentPackage,
-			IsDependency:        isDep,
-		}
-		component.IsDepPackages = append(component.IsDepPackages, foundDepPackage)
-	}
-
-	logger.Infof("obtained additional metadata for package: %s", purl)
-
-	d.checkedPurls[purl] = component
-
-	blob, err := json.Marshal(component)
-	if err != nil {
-		return err
-	}
-
-	doc := &processor.Document{
-		Blob:   blob,
-		Type:   processor.DocumentDepsDev,
-		Format: processor.FormatJSON,
-		SourceInformation: processor.SourceInformation{
-			Collector:   DepsCollector,
-			Source:      DepsCollector,
-			DocumentRef: events.GetDocRef(blob),
-		},
-	}
-	docChannel <- doc
-
-	return nil
+	return dependencyNodes, deps, nil
 }
 
-func (d *depsCollector) collectAdditionalMetadata(ctx context.Context, pkgType string, namespace *string, name string, version *string, pkgComponent *PackageComponent) error {
-	logger := logging.FromContext(ctx)
+func (d *depsCollector) collectAdditionalMetadata(ctx context.Context, responses []*pb.PurlLookupBatchResult_Response) (map[string]*PackageComponent, error) {
+	type pkgValues struct {
+		_type     string
+		namespace string
+		name      string
+	}
 
-	versionKey, err := getVersionKey(pkgType, namespace, name, version)
-	if err != nil {
-		return fmt.Errorf("failed to getVersionKey with the following error: %w", err)
-	}
-	versionReq := &pb.GetVersionRequest{
-		VersionKey: versionKey,
-	}
-	var versionResponse *pb.Version
-	if _, ok := d.versions[versionKey.String()]; ok {
-		versionResponse = d.versions[versionKey.String()]
-	} else {
-		logger.Debugf("The version key was not found in the map: %v", versionKey)
-		versionResponse, err = d.client.GetVersion(ctx, versionReq)
-		if err != nil {
-			if metricsErr := d.Metrics.AddCounter(ctx, GetVersionErrorsCounter, 1, pkgType, *namespace, name); metricsErr != nil {
-				logger.Errorf("failed to add counter: %v", metricsErr)
-			}
-			return fmt.Errorf("failed to get version information: %w", err)
+	logger := logging.FromContext(ctx)
+	var versionKeys []*pb.VersionKey
+	versionKeyToPurl := make(map[string]string)
+	purlToComponent := make(map[string]*PackageComponent)
+	projectIdToPurl := make(map[string]string)
+	purlToPkgValues := make(map[string]pkgValues)
+
+	// Collect version keys for batch request
+	for _, resp := range responses {
+		if resp.Result == nil {
+			logger.Infof("no valid result found for purl: %s", resp.Request.Purl)
+			continue
 		}
+
+		purl := resp.Request.Purl
+		component := &PackageComponent{}
+		packageInput, err := helpers.PurlToPkg(purl)
+		if err != nil {
+			logger.Infof("failed to parse purl to pkg: %s", purl)
+			continue
+		}
+
+		if packageInput != nil && *packageInput.Version == "" {
+			logger.Infof("purl does not contain version, skipping deps.dev query: %s", purl)
+			continue
+		}
+
+		var versionKey *pb.VersionKey
+		if resp.Result.Version != nil {
+			versionKey = resp.Result.Version.VersionKey
+		} else if resp.Result.Package != nil {
+			// Handle the case where the result is a package without a version
+			logger.Infof("purl %s is a package without a version", purl)
+			continue
+		} else {
+			logger.Infof("no valid result found for purl: %s", purl)
+			continue
+		}
+
+		versionKeys = append(versionKeys, versionKey)
+		component.CurrentPackage = packageInput
+		purlToComponent[purl] = component
+		versionKeyToPurl[versionKey.String()] = purl
+		d.checkedPurls[purl] = component
+
+		// Create project identifier
+		pkgType := packageInput.Type
+		namespace := packageInput.Namespace
+		name := packageInput.Name
+
+		purlToPkgValues[purl] = pkgValues{
+			_type:     pkgType,
+			namespace: *namespace,
+			name:      name,
+		}
+
+		projectId := strings.TrimSuffix(*namespace, "/") + "/" + name
+		projectIdToPurl[projectId] = purl
+	}
+
+	// Create batch request for versions
+	batchReq := &pb.GetVersionBatchRequest{
+		Requests: make([]*pb.GetVersionRequest, len(versionKeys)),
+	}
+	for i, key := range versionKeys {
+		batchReq.Requests[i] = &pb.GetVersionRequest{VersionKey: key}
+	}
+
+	// Send batch request
+	versionBatchResp, err := d.client.GetVersionBatch(ctx, batchReq)
+	if err != nil {
+		logger.Infof("failed to get versions in batch: %v", err)
+		return nil, err
 	}
 
 	var projectKeys []*pb.ProjectKey
-	for _, link := range versionResponse.Links {
-		if link.Label == sourceRepo {
-			src, err := helpers.VcsToSrc(link.Url)
-			if err != nil {
-				logger.Infof("unable to parse source url: %v, error: %v", link.Url, err)
-				continue
-			}
 
-			// check if source has already been ingest for this package (without version), if not add source to be ingest for hasSourceAt
-			// HasSourceAt is done at the pkgName level for all entries from deps.dev as it does not specify a tag or commit for each version
-			// of the package being ingested
-			purlWithoutVersion := "pkg:" + pkgType + "/" + strings.TrimSuffix(*namespace, "/") + "/" + name
-			if _, ok := d.ingestedSource[purlWithoutVersion]; !ok {
-				pkgComponent.Source = src
-				d.ingestedSource[purlWithoutVersion] = src
-			}
-
-			projectKey := &pb.ProjectKey{
-				Id: strings.TrimSuffix(src.Namespace, "/") + "/" + src.Name,
-			}
-			projectKeys = append(projectKeys, projectKey)
+	for _, resp := range versionBatchResp.Responses {
+		if resp.Version == nil {
+			logger.Infof("no valid version found for version key: %v", resp.Request.VersionKey)
+			continue
 		}
+
+		// Find the corresponding purl using the version key
+		purl, exists := versionKeyToPurl[resp.Version.VersionKey.String()]
+		if !exists {
+			logger.Infof("no purl found for version key: %v", resp.Version.VersionKey)
+			continue
+		}
+
+		// Find the corresponding component using the purl
+		component, exists := purlToComponent[purl]
+		if !exists {
+			logger.Infof("no component found for purl: %s", purl)
+			continue
+		}
+
+		for _, link := range resp.Version.Links {
+			if link.Label == sourceRepo {
+				src, err := helpers.VcsToSrc(link.Url)
+				if err != nil {
+					logger.Infof("unable to parse source url: %v, error: %v", link.Url, err)
+					continue
+				}
+
+				curPkgValues := purlToPkgValues[purl]
+
+				// check if source has already been ingest for this package (without version), if not add source to be ingest for hasSourceAt
+				// HasSourceAt is done at the pkgName level for all entries from deps.dev as it does not specify a tag or commit for each version
+				// of the package being ingested
+				purlWithoutVersion := "pkg:" + curPkgValues._type + "/" + strings.TrimSuffix(curPkgValues.namespace, "/") + "/" + curPkgValues.name
+				if _, ok := d.ingestedSource[purlWithoutVersion]; !ok {
+					component.Source = src
+					d.ingestedSource[purlWithoutVersion] = src
+				}
+
+				projectKey := &pb.ProjectKey{
+					Id: strings.TrimSuffix(src.Namespace, "/") + "/" + src.Name,
+				}
+				projectKeys = append(projectKeys, projectKey)
+			}
+		}
+
+		purlToComponent[purl] = component
 	}
 
 	projects, err := d.fetchProjectBatch(ctx, projectKeys)
 	if err != nil {
-		logger.Debugf("failed to fetch project batch: %v", err)
-		return err
+		logger.Errorf("failed to fetch project batch: %v", err)
+		return nil, fmt.Errorf("failed to fetch project batch, err: %v", err)
 	}
 
+	currentTime := time.Now().UTC()
+
 	for _, project := range projects {
+		purl := projectIdToPurl[project.ProjectKey.Id]
+		component := purlToComponent[purl]
 		if project.Scorecard != nil {
-			pkgComponent.Scorecard = &model.ScorecardInputSpec{}
-			pkgComponent.Scorecard.AggregateScore = float64(project.Scorecard.OverallScore)
-			pkgComponent.Scorecard.ScorecardCommit = project.Scorecard.Scorecard.Commit
-			pkgComponent.Scorecard.ScorecardVersion = project.Scorecard.Scorecard.Version
-			pkgComponent.Scorecard.TimeScanned = project.Scorecard.Date.AsTime().UTC()
+			component.Scorecard = &model.ScorecardInputSpec{}
+			component.Scorecard.AggregateScore = float64(project.Scorecard.OverallScore)
+			component.Scorecard.ScorecardCommit = project.Scorecard.Scorecard.Commit
+			component.Scorecard.ScorecardVersion = project.Scorecard.Scorecard.Version
+			component.Scorecard.TimeScanned = project.Scorecard.Date.AsTime().UTC()
 			var inputChecks []model.ScorecardCheckInputSpec
 
 			for _, check := range project.Scorecard.Checks {
@@ -607,14 +774,16 @@ func (d *depsCollector) collectAdditionalMetadata(ctx context.Context, pkgType s
 				}
 				inputChecks = append(inputChecks, inputCheck)
 			}
-			pkgComponent.Scorecard.Checks = inputChecks
+			component.Scorecard.Checks = inputChecks
 		}
+
+		// add time when data was obtained
+		component.UpdateTime = currentTime
+
+		purlToComponent[purl] = component
 	}
 
-	// add time when data was obtained
-	pkgComponent.UpdateTime = time.Now().UTC()
-
-	return nil
+	return purlToComponent, nil
 }
 
 func (d *depsCollector) fetchProjectBatch(ctx context.Context, projectKeys []*pb.ProjectKey) ([]*pb.Project, error) {
