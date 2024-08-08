@@ -122,3 +122,33 @@ func (s *DefaultServer) FindLatestSBOM(ctx context.Context, request gen.FindLate
 		URI:              sbom.Uri,
 	}, nil
 }
+
+func (s *DefaultServer) FindVulnerabilitiesInSBOM(ctx context.Context, request gen.FindVulnerabilitiesInSBOMRequestObject) (gen.FindVulnerabilitiesInSBOMResponseObject, error) {
+	sbom, err := helpers.LatestSBOMForAGivenId(ctx, s.gqlClient, request.Params.PkgID)
+	if err != nil {
+		return gen.FindVulnerabilitiesInSBOM500JSONResponse{
+			InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+				Message: err.Error(),
+			},
+		}, err
+	}
+
+	vulns, err := helpers.FindVulnerabilitiesInSBOM(ctx, s.gqlClient, sbom)
+
+	vulnResponse := gen.FindVulnerabilitiesInSBOM200JSONResponse{}
+
+	for _, vuln := range vulns {
+		var ids []string
+
+		for _, id := range vuln.Vulnerability.VulnerabilityIDs {
+			ids = append(ids, id.VulnerabilityID)
+		}
+
+		vulnResponse = append(vulnResponse, gen.VulnerabilityIDs{
+			Type:             vuln.Vulnerability.Type,
+			VulnerabilityIDs: ids,
+		})
+	}
+
+	return vulnResponse, nil
+}

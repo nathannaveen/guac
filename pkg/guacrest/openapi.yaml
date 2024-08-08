@@ -123,6 +123,32 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "502":
           $ref: "#/components/responses/BadGateway"
+  "/query/vulnerabilities-in-sbom":
+    get:
+      summary: Retrieve vulnerabilities in the latest SBOM for a given package
+      operationId: findVulnerabilitiesInSBOM
+      parameters:
+        - name: pkgID
+          description: The package-version level id.
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The vulnerabilities in the latest SBOM for the given package
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VulnerabilityIDs"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
 
 components:
   parameters:
@@ -200,6 +226,18 @@ components:
         KnownSince:
           type: string
           format: date-time
+    VulnerabilityIDs:
+      type: object
+      required:
+        - Type
+        - VulnerabilityIDs
+      properties:
+        Type:
+          type: string
+        VulnerabilityIDs:
+          type: array
+          items:
+            type: string
   responses:
     # for code 200
     PurlList:
@@ -226,6 +264,14 @@ components:
             type: array
             items:
               $ref: "#/components/schemas/PackageName"
+    VulnerabilityList:
+      description: A list of vulnerabilities
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/VulnerabilityIDs"
     # intended for code 400, client side error
     BadRequest:
       description: Bad request, such as from invalid or missing parameters

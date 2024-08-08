@@ -99,6 +99,9 @@ type ClientInterface interface {
 
 	// FindLatestSBOM request
 	FindLatestSBOM(ctx context.Context, params *FindLatestSBOMParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// FindVulnerabilitiesInSBOM request
+	FindVulnerabilitiesInSBOM(ctx context.Context, params *FindVulnerabilitiesInSBOMParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) AnalyzeDependencies(ctx context.Context, params *AnalyzeDependenciesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -139,6 +142,18 @@ func (c *Client) RetrieveDependencies(ctx context.Context, params *RetrieveDepen
 
 func (c *Client) FindLatestSBOM(ctx context.Context, params *FindLatestSBOMParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewFindLatestSBOMRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) FindVulnerabilitiesInSBOM(ctx context.Context, params *FindVulnerabilitiesInSBOMParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewFindVulnerabilitiesInSBOMRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -379,6 +394,51 @@ func NewFindLatestSBOMRequest(server string, params *FindLatestSBOMParams) (*htt
 	return req, nil
 }
 
+// NewFindVulnerabilitiesInSBOMRequest generates requests for FindVulnerabilitiesInSBOM
+func NewFindVulnerabilitiesInSBOMRequest(server string, params *FindVulnerabilitiesInSBOMParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/query/vulnerabilities-in-sbom")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "pkgID", runtime.ParamLocationQuery, params.PkgID); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -433,6 +493,9 @@ type ClientWithResponsesInterface interface {
 
 	// FindLatestSBOMWithResponse request
 	FindLatestSBOMWithResponse(ctx context.Context, params *FindLatestSBOMParams, reqEditors ...RequestEditorFn) (*FindLatestSBOMResponse, error)
+
+	// FindVulnerabilitiesInSBOMWithResponse request
+	FindVulnerabilitiesInSBOMWithResponse(ctx context.Context, params *FindVulnerabilitiesInSBOMParams, reqEditors ...RequestEditorFn) (*FindVulnerabilitiesInSBOMResponse, error)
 }
 
 type AnalyzeDependenciesResponse struct {
@@ -532,6 +595,31 @@ func (r FindLatestSBOMResponse) StatusCode() int {
 	return 0
 }
 
+type FindVulnerabilitiesInSBOMResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]VulnerabilityIDs
+	JSON400      *BadRequest
+	JSON500      *InternalServerError
+	JSON502      *BadGateway
+}
+
+// Status returns HTTPResponse.Status
+func (r FindVulnerabilitiesInSBOMResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r FindVulnerabilitiesInSBOMResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 // AnalyzeDependenciesWithResponse request returning *AnalyzeDependenciesResponse
 func (c *ClientWithResponses) AnalyzeDependenciesWithResponse(ctx context.Context, params *AnalyzeDependenciesParams, reqEditors ...RequestEditorFn) (*AnalyzeDependenciesResponse, error) {
 	rsp, err := c.AnalyzeDependencies(ctx, params, reqEditors...)
@@ -566,6 +654,15 @@ func (c *ClientWithResponses) FindLatestSBOMWithResponse(ctx context.Context, pa
 		return nil, err
 	}
 	return ParseFindLatestSBOMResponse(rsp)
+}
+
+// FindVulnerabilitiesInSBOMWithResponse request returning *FindVulnerabilitiesInSBOMResponse
+func (c *ClientWithResponses) FindVulnerabilitiesInSBOMWithResponse(ctx context.Context, params *FindVulnerabilitiesInSBOMParams, reqEditors ...RequestEditorFn) (*FindVulnerabilitiesInSBOMResponse, error) {
+	rsp, err := c.FindVulnerabilitiesInSBOM(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseFindVulnerabilitiesInSBOMResponse(rsp)
 }
 
 // ParseAnalyzeDependenciesResponse parses an HTTP response from a AnalyzeDependenciesWithResponse call
@@ -704,6 +801,53 @@ func ParseFindLatestSBOMResponse(rsp *http.Response) (*FindLatestSBOMResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest HasSBOM
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseFindVulnerabilitiesInSBOMResponse parses an HTTP response from a FindVulnerabilitiesInSBOMWithResponse call
+func ParseFindVulnerabilitiesInSBOMResponse(rsp *http.Response) (*FindVulnerabilitiesInSBOMResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &FindVulnerabilitiesInSBOMResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []VulnerabilityIDs
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

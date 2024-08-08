@@ -28,6 +28,9 @@ type ServerInterface interface {
 	// Retrieve the latest SBOM for a given package
 	// (GET /query/latest-sbom)
 	FindLatestSBOM(w http.ResponseWriter, r *http.Request, params FindLatestSBOMParams)
+	// Retrieve vulnerabilities in the latest SBOM for a given package
+	// (GET /query/vulnerabilities-in-sbom)
+	FindVulnerabilitiesInSBOM(w http.ResponseWriter, r *http.Request, params FindVulnerabilitiesInSBOMParams)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -55,6 +58,12 @@ func (_ Unimplemented) RetrieveDependencies(w http.ResponseWriter, r *http.Reque
 // Retrieve the latest SBOM for a given package
 // (GET /query/latest-sbom)
 func (_ Unimplemented) FindLatestSBOM(w http.ResponseWriter, r *http.Request, params FindLatestSBOMParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Retrieve vulnerabilities in the latest SBOM for a given package
+// (GET /query/vulnerabilities-in-sbom)
+func (_ Unimplemented) FindVulnerabilitiesInSBOM(w http.ResponseWriter, r *http.Request, params FindVulnerabilitiesInSBOMParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -212,6 +221,41 @@ func (siw *ServerInterfaceWrapper) FindLatestSBOM(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r.WithContext(ctx))
 }
 
+// FindVulnerabilitiesInSBOM operation middleware
+func (siw *ServerInterfaceWrapper) FindVulnerabilitiesInSBOM(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params FindVulnerabilitiesInSBOMParams
+
+	// ------------- Required query parameter "pkgID" -------------
+
+	if paramValue := r.URL.Query().Get("pkgID"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pkgID"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "pkgID", r.URL.Query(), &params.PkgID)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pkgID", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.FindVulnerabilitiesInSBOM(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r.WithContext(ctx))
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -336,6 +380,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/query/latest-sbom", wrapper.FindLatestSBOM)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/query/vulnerabilities-in-sbom", wrapper.FindVulnerabilitiesInSBOM)
 	})
 
 	return r
@@ -509,6 +556,52 @@ func (response FindLatestSBOM502JSONResponse) VisitFindLatestSBOMResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type FindVulnerabilitiesInSBOMRequestObject struct {
+	Params FindVulnerabilitiesInSBOMParams
+}
+
+type FindVulnerabilitiesInSBOMResponseObject interface {
+	VisitFindVulnerabilitiesInSBOMResponse(w http.ResponseWriter) error
+}
+
+type FindVulnerabilitiesInSBOM200JSONResponse []VulnerabilityIDs
+
+func (response FindVulnerabilitiesInSBOM200JSONResponse) VisitFindVulnerabilitiesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type FindVulnerabilitiesInSBOM400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response FindVulnerabilitiesInSBOM400JSONResponse) VisitFindVulnerabilitiesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type FindVulnerabilitiesInSBOM500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response FindVulnerabilitiesInSBOM500JSONResponse) VisitFindVulnerabilitiesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type FindVulnerabilitiesInSBOM502JSONResponse struct{ BadGatewayJSONResponse }
+
+func (response FindVulnerabilitiesInSBOM502JSONResponse) VisitFindVulnerabilitiesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Identify the most important dependencies
@@ -523,6 +616,9 @@ type StrictServerInterface interface {
 	// Retrieve the latest SBOM for a given package
 	// (GET /query/latest-sbom)
 	FindLatestSBOM(ctx context.Context, request FindLatestSBOMRequestObject) (FindLatestSBOMResponseObject, error)
+	// Retrieve vulnerabilities in the latest SBOM for a given package
+	// (GET /query/vulnerabilities-in-sbom)
+	FindVulnerabilitiesInSBOM(ctx context.Context, request FindVulnerabilitiesInSBOMRequestObject) (FindVulnerabilitiesInSBOMResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -649,6 +745,32 @@ func (sh *strictHandler) FindLatestSBOM(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(FindLatestSBOMResponseObject); ok {
 		if err := validResponse.VisitFindLatestSBOMResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// FindVulnerabilitiesInSBOM operation middleware
+func (sh *strictHandler) FindVulnerabilitiesInSBOM(w http.ResponseWriter, r *http.Request, params FindVulnerabilitiesInSBOMParams) {
+	var request FindVulnerabilitiesInSBOMRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.FindVulnerabilitiesInSBOM(ctx, request.(FindVulnerabilitiesInSBOMRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FindVulnerabilitiesInSBOM")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(FindVulnerabilitiesInSBOMResponseObject); ok {
+		if err := validResponse.VisitFindVulnerabilitiesInSBOMResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	model "github.com/guacsec/guac/pkg/assembler/clients/generated"
-	"go.uber.org/zap"
 	"strings"
 
 	"github.com/Khan/genqlient/graphql"
@@ -79,12 +78,12 @@ func LatestSBOMForAGivenId(ctx context.Context, client graphql.Client, id string
 func compare(a *model.AllHasSBOMTree, b *model.AllHasSBOMTree, gqlClient graphql.Client) bool {
 	logger := logging.FromContext(context.Background())
 
-	aVersion, err := findSubjectBasedOnType(a, gqlClient, logger)
+	aVersion, err := findSubjectBasedOnType(a, gqlClient)
 	if err != nil {
 		return false
 	}
 
-	bVersion, err := findSubjectBasedOnType(b, gqlClient, logger)
+	bVersion, err := findSubjectBasedOnType(b, gqlClient)
 	if err != nil {
 		return false
 	}
@@ -112,12 +111,12 @@ func compare(a *model.AllHasSBOMTree, b *model.AllHasSBOMTree, gqlClient graphql
 	return parsedAVersion.Compare(parsedBVersion) > 0
 }
 
-func findSubjectBasedOnType(a *model.AllHasSBOMTree, gqlClient graphql.Client, logger *zap.SugaredLogger) (string, error) {
+func findSubjectBasedOnType(a *model.AllHasSBOMTree, gqlClient graphql.Client) (string, error) {
 	var version string
 	switch subject := a.Subject.(type) {
 	case *model.AllHasSBOMTreeSubjectArtifact:
 		// Get the package attached to the artifact via an isOccurrence node
-		pkg, err := getPkgFromArtifact(gqlClient, subject.Id, logger)
+		pkg, err := getPkgFromArtifact(gqlClient, subject.Id)
 		if err != nil {
 			return "", fmt.Errorf("could not find package for subject: %s, with err: %v", subject.Id, err)
 		}
@@ -125,21 +124,19 @@ func findSubjectBasedOnType(a *model.AllHasSBOMTree, gqlClient graphql.Client, l
 	case *model.AllHasSBOMTreeSubjectPackage:
 		version = subject.Namespaces[0].Names[0].Versions[0].Version
 	default:
-		logger.Error("Unknown subject type")
 		return "", fmt.Errorf("Unknown subject type")
 	}
 	return version, nil
 }
 
-func getPkgFromArtifact(gqlClient graphql.Client, id string, logger *zap.SugaredLogger) (*model.AllPkgTree, error) {
+func getPkgFromArtifact(gqlClient graphql.Client, id string) (*model.AllPkgTree, error) {
 	rsp, err := model.Occurrences(context.Background(), gqlClient, model.IsOccurrenceSpec{
 		Artifact: &model.ArtifactSpec{
 			Id: &id,
 		},
 	})
 	if err != nil {
-		logger.Errorw("Failed to get occurrences", "artifactID", id, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("error getting occurrences from artifact %s: %v", id, err)
 	}
 	for i := range rsp.GetIsOccurrence() {
 		if *rsp.GetIsOccurrence()[i].GetSubject().GetTypename() == "Package" {

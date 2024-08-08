@@ -51,6 +51,12 @@ type PaginationInfo struct {
 // Purl defines model for Purl.
 type Purl = string
 
+// VulnerabilityIDs defines model for VulnerabilityIDs.
+type VulnerabilityIDs struct {
+	Type             string   `json:"Type"`
+	VulnerabilityIDs []string `json:"VulnerabilityIDs"`
+}
+
 // PaginationSpec defines model for PaginationSpec.
 type PaginationSpec struct {
 	Cursor   *string `json:"Cursor,omitempty"`
@@ -114,6 +120,12 @@ type RetrieveDependenciesParamsLinkCondition string
 
 // FindLatestSBOMParams defines parameters for FindLatestSBOM.
 type FindLatestSBOMParams struct {
+	// PkgID The package-version level id.
+	PkgID string `form:"pkgID" json:"pkgID"`
+}
+
+// FindVulnerabilitiesInSBOMParams defines parameters for FindVulnerabilitiesInSBOM.
+type FindVulnerabilitiesInSBOMParams struct {
 	// PkgID The package-version level id.
 	PkgID string `form:"pkgID" json:"pkgID"`
 }
