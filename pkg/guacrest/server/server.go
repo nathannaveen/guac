@@ -152,3 +152,31 @@ func (s *DefaultServer) FindVulnerabilitiesInSBOM(ctx context.Context, request g
 
 	return vulnResponse, nil
 }
+
+func (s *DefaultServer) FindLicensesInSBOM(ctx context.Context, request gen.FindLicensesInSBOMRequestObject) (gen.FindLicensesInSBOMResponseObject, error) {
+	sbom, err := helpers.LatestSBOMForAGivenId(ctx, s.gqlClient, request.Params.PkgID)
+	if err != nil {
+		return gen.FindLicensesInSBOM500JSONResponse{
+			InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+				Message: err.Error(),
+			},
+		}, err
+	}
+
+	licenseResponse := gen.FindLicensesInSBOM200JSONResponse{}
+
+	certLegals, err := helpers.FindLicensesInSBOM(ctx, s.gqlClient, sbom)
+
+	for _, certLegal := range certLegals {
+		for _, license := range certLegal.DeclaredLicenses {
+			licenseResponse = append(licenseResponse, gen.LicenseIDs{
+				Id:          license.Id,
+				InLine:      license.Inline,
+				ListVersion: license.ListVersion,
+				Name:        license.Name,
+			})
+		}
+	}
+
+	return licenseResponse, nil
+}

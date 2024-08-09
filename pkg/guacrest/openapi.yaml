@@ -125,24 +125,50 @@ paths:
           $ref: "#/components/responses/BadGateway"
   "/query/vulnerabilities-in-sbom":
     get:
-      summary: Retrieve vulnerabilities in the latest SBOM for a given package
+      summary: Retrieve all vulnerabilities in the latest SBOM for a given package or artifact
       operationId: findVulnerabilitiesInSBOM
       parameters:
         - name: pkgID
-          description: The package-version level id.
+          description: The artifact id or package-version level id.
           in: query
           required: true
           schema:
             type: string
       responses:
         "200":
-          description: The vulnerabilities in the latest SBOM for the given package
+          description: The vulnerabilities in the latest SBOM for the given package or artifact
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/VulnerabilityIDs"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/query/licenses-in-sbom":
+    get:
+      summary: Retrieve all licenses in the latest SBOM for a given package or artifact
+      operationId: findLicensesInSBOM
+      parameters:
+        - name: pkgID
+          description: The artifact id or package-version level id.
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The licenses in the latest SBOM for the given package or artifact
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/licenseIDs"
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -238,6 +264,22 @@ components:
           type: array
           items:
             type: string
+    licenseIDs:
+      type: object
+      required:
+        - Id
+        - Name
+        - inline
+        - listVersion
+      properties:
+        Id:
+          type: string
+        Name:
+          type: string
+        InLine:
+          type: string
+        ListVersion:
+          type: string
   responses:
     # for code 200
     PurlList:
@@ -272,6 +314,14 @@ components:
             type: array
             items:
               $ref: "#/components/schemas/VulnerabilityIDs"
+    LicenseList:
+      description: A list of vulnerabilities
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/licenseIDs"
     # intended for code 400, client side error
     BadRequest:
       description: Bad request, such as from invalid or missing parameters

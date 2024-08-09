@@ -28,7 +28,10 @@ type ServerInterface interface {
 	// Retrieve the latest SBOM for a given package
 	// (GET /query/latest-sbom)
 	FindLatestSBOM(w http.ResponseWriter, r *http.Request, params FindLatestSBOMParams)
-	// Retrieve vulnerabilities in the latest SBOM for a given package
+	// Retrieve all licenses in the latest SBOM for a given package or artifact
+	// (GET /query/licenses-in-sbom)
+	FindLicensesInSBOM(w http.ResponseWriter, r *http.Request, params FindLicensesInSBOMParams)
+	// Retrieve all vulnerabilities in the latest SBOM for a given package or artifact
 	// (GET /query/vulnerabilities-in-sbom)
 	FindVulnerabilitiesInSBOM(w http.ResponseWriter, r *http.Request, params FindVulnerabilitiesInSBOMParams)
 }
@@ -61,7 +64,13 @@ func (_ Unimplemented) FindLatestSBOM(w http.ResponseWriter, r *http.Request, pa
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Retrieve vulnerabilities in the latest SBOM for a given package
+// Retrieve all licenses in the latest SBOM for a given package or artifact
+// (GET /query/licenses-in-sbom)
+func (_ Unimplemented) FindLicensesInSBOM(w http.ResponseWriter, r *http.Request, params FindLicensesInSBOMParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Retrieve all vulnerabilities in the latest SBOM for a given package or artifact
 // (GET /query/vulnerabilities-in-sbom)
 func (_ Unimplemented) FindVulnerabilitiesInSBOM(w http.ResponseWriter, r *http.Request, params FindVulnerabilitiesInSBOMParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -212,6 +221,41 @@ func (siw *ServerInterfaceWrapper) FindLatestSBOM(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.FindLatestSBOM(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// FindLicensesInSBOM operation middleware
+func (siw *ServerInterfaceWrapper) FindLicensesInSBOM(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params FindLicensesInSBOMParams
+
+	// ------------- Required query parameter "pkgID" -------------
+
+	if paramValue := r.URL.Query().Get("pkgID"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pkgID"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "pkgID", r.URL.Query(), &params.PkgID)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pkgID", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.FindLicensesInSBOM(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -380,6 +424,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/query/latest-sbom", wrapper.FindLatestSBOM)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/query/licenses-in-sbom", wrapper.FindLicensesInSBOM)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/query/vulnerabilities-in-sbom", wrapper.FindVulnerabilitiesInSBOM)
@@ -556,6 +603,52 @@ func (response FindLatestSBOM502JSONResponse) VisitFindLatestSBOMResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type FindLicensesInSBOMRequestObject struct {
+	Params FindLicensesInSBOMParams
+}
+
+type FindLicensesInSBOMResponseObject interface {
+	VisitFindLicensesInSBOMResponse(w http.ResponseWriter) error
+}
+
+type FindLicensesInSBOM200JSONResponse []LicenseIDs
+
+func (response FindLicensesInSBOM200JSONResponse) VisitFindLicensesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type FindLicensesInSBOM400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response FindLicensesInSBOM400JSONResponse) VisitFindLicensesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type FindLicensesInSBOM500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response FindLicensesInSBOM500JSONResponse) VisitFindLicensesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type FindLicensesInSBOM502JSONResponse struct{ BadGatewayJSONResponse }
+
+func (response FindLicensesInSBOM502JSONResponse) VisitFindLicensesInSBOMResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type FindVulnerabilitiesInSBOMRequestObject struct {
 	Params FindVulnerabilitiesInSBOMParams
 }
@@ -616,7 +709,10 @@ type StrictServerInterface interface {
 	// Retrieve the latest SBOM for a given package
 	// (GET /query/latest-sbom)
 	FindLatestSBOM(ctx context.Context, request FindLatestSBOMRequestObject) (FindLatestSBOMResponseObject, error)
-	// Retrieve vulnerabilities in the latest SBOM for a given package
+	// Retrieve all licenses in the latest SBOM for a given package or artifact
+	// (GET /query/licenses-in-sbom)
+	FindLicensesInSBOM(ctx context.Context, request FindLicensesInSBOMRequestObject) (FindLicensesInSBOMResponseObject, error)
+	// Retrieve all vulnerabilities in the latest SBOM for a given package or artifact
 	// (GET /query/vulnerabilities-in-sbom)
 	FindVulnerabilitiesInSBOM(ctx context.Context, request FindVulnerabilitiesInSBOMRequestObject) (FindVulnerabilitiesInSBOMResponseObject, error)
 }
@@ -745,6 +841,32 @@ func (sh *strictHandler) FindLatestSBOM(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(FindLatestSBOMResponseObject); ok {
 		if err := validResponse.VisitFindLatestSBOMResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// FindLicensesInSBOM operation middleware
+func (sh *strictHandler) FindLicensesInSBOM(w http.ResponseWriter, r *http.Request, params FindLicensesInSBOMParams) {
+	var request FindLicensesInSBOMRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.FindLicensesInSBOM(ctx, request.(FindLicensesInSBOMRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FindLicensesInSBOM")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(FindLicensesInSBOMResponseObject); ok {
+		if err := validResponse.VisitFindLicensesInSBOMResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

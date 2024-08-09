@@ -24,7 +24,12 @@ func FindVulnerabilitiesInSBOM(ctx context.Context, client graphql.Client, sbom 
 			}
 			vulnerabilities = append(vulnerabilities, vulns...)
 		case *model.AllHasSBOMTreeIncludedSoftwareArtifact:
-			vulns, err := getVulnerabilitiesForArtifact(ctx, client, s.Id, logger)
+			// convert artifact to pkg, then use the pkg id to get the vulnerability
+			pkg, err := getPkgFromArtifact(client, s.Id)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get package attached to artifact %s: %w", s.Id, err)
+			}
+			vulns, err := getVulnerabilitiesForPackage(ctx, client, pkg.Namespaces[0].Names[0].Versions[0].Id, logger)
 			if err != nil {
 				logger.Errorw("Failed to get vulnerabilities for artifact", "id", s.Id, "error", err)
 				return nil, err
@@ -45,23 +50,7 @@ func getVulnerabilitiesForPackage(ctx context.Context, client graphql.Client, pk
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query vulnerabilities for package %s: %w", pkgID, err)
-	}
-	return vulns.CertifyVuln, nil
-}
-
-func getVulnerabilitiesForArtifact(ctx context.Context, client graphql.Client, artifactID string, logger *zap.SugaredLogger) ([]model.CertifyVulnCertifyVuln, error) {
-	pkg, err := getPkgFromArtifact(client, artifactID)
-	if err != nil {
-		return nil, fmt.Errorf("failed get package attached to artifact %s: %w", artifactID, err)
-	}
-	vulns, err := model.CertifyVuln(ctx, client, model.CertifyVulnSpec{
-		Package: &model.PkgSpec{
-			Id: &pkg.Namespaces[0].Names[0].Versions[0].Id,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to query vulnerabilities for artifact %s: %w", artifactID, err)
+		return nil, fmt.Errorf("failed to query vulnerabilities %s: %w", pkgID, err)
 	}
 	return vulns.CertifyVuln, nil
 }
