@@ -57,6 +57,14 @@ type VulnerabilityIDs struct {
 	VulnerabilityIDs []string `json:"VulnerabilityIDs"`
 }
 
+// LicenseIDs defines model for licenseIDs.
+type LicenseIDs struct {
+	Id          string  `json:"Id"`
+	InLine      *string `json:"InLine,omitempty"`
+	ListVersion *string `json:"ListVersion,omitempty"`
+	Name        string  `json:"Name"`
+}
+
 // PaginationSpec defines model for PaginationSpec.
 type PaginationSpec struct {
 	Cursor   *string `json:"Cursor,omitempty"`
@@ -124,8 +132,14 @@ type FindLatestSBOMParams struct {
 	PkgID string `form:"pkgID" json:"pkgID"`
 }
 
+// FindLicensesInSBOMParams defines parameters for FindLicensesInSBOM.
+type FindLicensesInSBOMParams struct {
+	// PkgID The artifact id or package-version level id.
+	PkgID string `form:"pkgID" json:"pkgID"`
+}
+
 // FindVulnerabilitiesInSBOMParams defines parameters for FindVulnerabilitiesInSBOM.
 type FindVulnerabilitiesInSBOMParams struct {
-	// PkgID The package-version level id.
+	// PkgID The artifact id or package-version level id.
 	PkgID string `form:"pkgID" json:"pkgID"`
 }
