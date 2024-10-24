@@ -18,6 +18,48 @@ type Error struct {
 	Message string `json:"Message"`
 }
 
+// Legal defines model for Legal.
+type Legal struct {
+	// Attribution Attribution text of the subject
+	Attribution *string `json:"attribution,omitempty"`
+
+	// Collector GUAC collector for the document
+	Collector *string `json:"collector,omitempty"`
+
+	// DeclaredLicense The license expression as declared
+	DeclaredLicense *string `json:"declaredLicense,omitempty"`
+
+	// DeclaredLicenses A list of license objects found in the declared license expression
+	DeclaredLicenses *[]License `json:"declaredLicenses,omitempty"`
+
+	// DiscoveredLicense The license expression as discovered by scan
+	DiscoveredLicense *string `json:"discoveredLicense,omitempty"`
+
+	// DiscoveredLicenses A list of license objects found in the discovered license expression
+	DiscoveredLicenses *[]License `json:"discoveredLicenses,omitempty"`
+
+	// Justification Extra justification for the certification
+	Justification *string `json:"justification,omitempty"`
+
+	// Origin Document from which this attestation is generated from
+	Origin *string `json:"origin,omitempty"`
+
+	// TimeScanned Time of scan (in RFC 3339 format)
+	TimeScanned *time.Time `json:"timeScanned,omitempty"`
+}
+
+// License defines model for License.
+type License struct {
+	// Inline Full license text if not on the SPDX list
+	Inline *string `json:"inline"`
+
+	// ListVersion SPDX license list version
+	ListVersion *string `json:"listVersion"`
+
+	// Name Name of the license, typically the SPDX identifier
+	Name *string `json:"name,omitempty"`
+}
+
 // PackageName defines model for PackageName.
 type PackageName struct {
 	DependentCount int  `json:"DependentCount"`
@@ -74,6 +116,9 @@ type BadRequest = Error
 // InternalServerError defines model for InternalServerError.
 type InternalServerError = Error
 
+// LicenseList defines model for LicenseList.
+type LicenseList = []Legal
+
 // PackageNameList defines model for PackageNameList.
 type PackageNameList = []PackageName
 
@@ -102,6 +147,12 @@ type AnalyzeDependenciesParams struct {
 
 // AnalyzeDependenciesParamsSort defines parameters for AnalyzeDependencies.
 type AnalyzeDependenciesParamsSort string
+
+// GetPackageLicensesParams defines parameters for GetPackageLicenses.
+type GetPackageLicensesParams struct {
+	// IncludeDependencies A flag to include licenses of the dependencies. If true, the  response will include licenses for the purl and its dependencies  instead of the licenses of just the purl.
+	IncludeDependencies *bool `form:"includeDependencies,omitempty" json:"includeDependencies,omitempty"`
+}
 
 // GetPackageVulnsParams defines parameters for GetPackageVulns.
 type GetPackageVulnsParams struct {

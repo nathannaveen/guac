@@ -86,3 +86,80 @@ func searchVulnerabilitiesViaArtifact(ctx context.Context, gqlClient graphql.Cli
 
 	return vulnerabilities, nil
 }
+
+// searchLicensesViaArtifact searches for licenses associated with the given artifact
+// and its dependencies.
+//
+// Parameters:
+// - ctx: The context for the operation
+// - gqlClient: The GraphQL client used for querying
+// - artifact: The artifact digest (e.g., "sha256:<digest>") to start the search from
+//
+// Returns:
+// - A slice of Legal objects containing the found licenses
+// - An error, if any occurs during the search or data retrieval
+//
+// The function utilizes GetDepsForArtifact to traverse the dependencies
+// of the specified artifact and collects licenses for each discovered package.
+func searchLicensesViaArtifact(ctx context.Context, gqlClient graphql.Client, artifact string) (gen.LicenseList, error) {
+	logger := logging.FromContext(ctx)
+	var licenses gen.LicenseList
+
+	// GetDepsForArtifact returns a map of package IDs to package nodes
+	pkgs, err := GetDepsForArtifact(ctx, gqlClient, artifact)
+	if err != nil {
+		return nil, err
+	}
+
+	for pkgID := range pkgs {
+		certLegals, err := model.CertifyLegal(ctx, gqlClient, model.CertifyLegalSpec{
+			Subject: &model.PackageOrSourceSpec{
+				Package: &model.PkgSpec{
+					Id: &pkgID,
+				},
+			},
+		})
+		if err != nil {
+			logger.Errorf("error fetching licenses from package spec: %v", err)
+			return nil, helpers.Err502
+		}
+
+		for _, lic := range certLegals.CertifyLegal {
+			license := gen.Legal{
+				Attribution:       &lic.Attribution,
+				Collector:         &lic.Collector,
+				DeclaredLicense:   &lic.DeclaredLicense,
+				DiscoveredLicense: &lic.DiscoveredLicense,
+				Justification:     &lic.Justification,
+				Origin:            &lic.Origin,
+				TimeScanned:       &lic.TimeScanned,
+			}
+
+			var declaredLicenses []gen.License
+			var discoveredLicenses []gen.License
+
+			for _, declared := range lic.DeclaredLicenses {
+				declaredLicenses = append(declaredLicenses, gen.License{
+					Inline:      declared.Inline,
+					ListVersion: declared.ListVersion,
+					Name:        &declared.Name,
+				})
+			}
+
+			for _, discovered := range lic.DiscoveredLicenses {
+				discoveredLicenses = append(discoveredLicenses, gen.License{
+					Inline:      discovered.Inline,
+					ListVersion: discovered.ListVersion,
+					Name:        &discovered.Name,
+				})
+			}
+
+			license.DeclaredLicenses = &declaredLicenses
+			license.DiscoveredLicenses = &discoveredLicenses
+
+			licenses = append(licenses, license)
+		}
+	}
+
+	return licenses, nil
+}

@@ -97,6 +97,9 @@ type ClientInterface interface {
 	// GetArtifactDeps request
 	GetArtifactDeps(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetArtifactLicenses request
+	GetArtifactLicenses(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetArtifactVulns request
 	GetArtifactVulns(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -105,6 +108,9 @@ type ClientInterface interface {
 
 	// GetPackageDeps request
 	GetPackageDeps(ctx context.Context, purl string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPackageLicenses request
+	GetPackageLicenses(ctx context.Context, purl string, params *GetPackageLicensesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPackageVulns request
 	GetPackageVulns(ctx context.Context, purl string, params *GetPackageVulnsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -146,6 +152,18 @@ func (c *Client) GetArtifactDeps(ctx context.Context, digest string, reqEditors 
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetArtifactLicenses(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetArtifactLicensesRequest(c.Server, digest)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) GetArtifactVulns(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetArtifactVulnsRequest(c.Server, digest)
 	if err != nil {
@@ -172,6 +190,18 @@ func (c *Client) GetPackagePurls(ctx context.Context, purl string, reqEditors ..
 
 func (c *Client) GetPackageDeps(ctx context.Context, purl string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPackageDepsRequest(c.Server, purl)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetPackageLicenses(ctx context.Context, purl string, params *GetPackageLicensesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPackageLicensesRequest(c.Server, purl, params)
 	if err != nil {
 		return nil, err
 	}
@@ -316,6 +346,40 @@ func NewGetArtifactDepsRequest(server string, digest string) (*http.Request, err
 	return req, nil
 }
 
+// NewGetArtifactLicensesRequest generates requests for GetArtifactLicenses
+func NewGetArtifactLicensesRequest(server string, digest string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "digest", runtime.ParamLocationPath, digest)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/artifact/%s/licenses", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetArtifactVulnsRequest generates requests for GetArtifactVulns
 func NewGetArtifactVulnsRequest(server string, digest string) (*http.Request, error) {
 	var err error
@@ -408,6 +472,62 @@ func NewGetPackageDepsRequest(server string, purl string) (*http.Request, error)
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPackageLicensesRequest generates requests for GetPackageLicenses
+func NewGetPackageLicensesRequest(server string, purl string, params *GetPackageLicensesParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "purl", runtime.ParamLocationPath, purl)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/package/%s/licenses", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.IncludeDependencies != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "includeDependencies", runtime.ParamLocationQuery, *params.IncludeDependencies); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -526,6 +646,9 @@ type ClientWithResponsesInterface interface {
 	// GetArtifactDepsWithResponse request
 	GetArtifactDepsWithResponse(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*GetArtifactDepsResponse, error)
 
+	// GetArtifactLicensesWithResponse request
+	GetArtifactLicensesWithResponse(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*GetArtifactLicensesResponse, error)
+
 	// GetArtifactVulnsWithResponse request
 	GetArtifactVulnsWithResponse(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*GetArtifactVulnsResponse, error)
 
@@ -534,6 +657,9 @@ type ClientWithResponsesInterface interface {
 
 	// GetPackageDepsWithResponse request
 	GetPackageDepsWithResponse(ctx context.Context, purl string, reqEditors ...RequestEditorFn) (*GetPackageDepsResponse, error)
+
+	// GetPackageLicensesWithResponse request
+	GetPackageLicensesWithResponse(ctx context.Context, purl string, params *GetPackageLicensesParams, reqEditors ...RequestEditorFn) (*GetPackageLicensesResponse, error)
 
 	// GetPackageVulnsWithResponse request
 	GetPackageVulnsWithResponse(ctx context.Context, purl string, params *GetPackageVulnsParams, reqEditors ...RequestEditorFn) (*GetPackageVulnsResponse, error)
@@ -605,6 +731,31 @@ func (r GetArtifactDepsResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetArtifactDepsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetArtifactLicensesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LicenseList
+	JSON400      *BadRequest
+	JSON500      *InternalServerError
+	JSON502      *BadGateway
+}
+
+// Status returns HTTPResponse.Status
+func (r GetArtifactLicensesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetArtifactLicensesResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -686,6 +837,31 @@ func (r GetPackageDepsResponse) StatusCode() int {
 	return 0
 }
 
+type GetPackageLicensesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LicenseList
+	JSON400      *BadRequest
+	JSON500      *InternalServerError
+	JSON502      *BadGateway
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPackageLicensesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPackageLicensesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetPackageVulnsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -738,6 +914,15 @@ func (c *ClientWithResponses) GetArtifactDepsWithResponse(ctx context.Context, d
 	return ParseGetArtifactDepsResponse(rsp)
 }
 
+// GetArtifactLicensesWithResponse request returning *GetArtifactLicensesResponse
+func (c *ClientWithResponses) GetArtifactLicensesWithResponse(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*GetArtifactLicensesResponse, error) {
+	rsp, err := c.GetArtifactLicenses(ctx, digest, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetArtifactLicensesResponse(rsp)
+}
+
 // GetArtifactVulnsWithResponse request returning *GetArtifactVulnsResponse
 func (c *ClientWithResponses) GetArtifactVulnsWithResponse(ctx context.Context, digest string, reqEditors ...RequestEditorFn) (*GetArtifactVulnsResponse, error) {
 	rsp, err := c.GetArtifactVulns(ctx, digest, reqEditors...)
@@ -763,6 +948,15 @@ func (c *ClientWithResponses) GetPackageDepsWithResponse(ctx context.Context, pu
 		return nil, err
 	}
 	return ParseGetPackageDepsResponse(rsp)
+}
+
+// GetPackageLicensesWithResponse request returning *GetPackageLicensesResponse
+func (c *ClientWithResponses) GetPackageLicensesWithResponse(ctx context.Context, purl string, params *GetPackageLicensesParams, reqEditors ...RequestEditorFn) (*GetPackageLicensesResponse, error) {
+	rsp, err := c.GetPackageLicenses(ctx, purl, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPackageLicensesResponse(rsp)
 }
 
 // GetPackageVulnsWithResponse request returning *GetPackageVulnsResponse
@@ -863,6 +1057,53 @@ func ParseGetArtifactDepsResponse(rsp *http.Response) (*GetArtifactDepsResponse,
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest PurlList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetArtifactLicensesResponse parses an HTTP response from a GetArtifactLicensesWithResponse call
+func ParseGetArtifactLicensesResponse(rsp *http.Response) (*GetArtifactLicensesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetArtifactLicensesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LicenseList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1004,6 +1245,53 @@ func ParseGetPackageDepsResponse(rsp *http.Response) (*GetPackageDepsResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest PurlList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPackageLicensesResponse parses an HTTP response from a GetPackageLicensesWithResponse call
+func ParseGetPackageLicensesResponse(rsp *http.Response) (*GetPackageLicensesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPackageLicensesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LicenseList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

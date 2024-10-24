@@ -63,6 +63,11 @@ const (
 	defaultHasSlsaCollector      = "test-collector"
 	defaultHasSlsaPredicateKey   = "test-predicate-key"
 	defaultHasSlsaPredicateValue = "test-predicate-value"
+
+	// CertifyLegal
+	defaultCertifyLegalJustification = "test-legal-justification"
+	defaultCertifyLegalOrigin        = "test-legal-origin"
+	defaultCertifyLegalCollector     = "test-legal-collector"
 )
 
 // GuacData Defines the Guac graph, to test clients of the Graphql server.
@@ -77,11 +82,12 @@ const (
 // could be added if needed.
 type GuacData struct {
 	/** the nouns need to be specified here in order to be referenced from a verb **/
-	Packages        []string // packages are specified by purl
-	Artifacts       []string // artifacts are specified by digest
-	Sources         []string // sources are specified by the name in the SourceName node
-	Builders        []string // builders are specified by URI
-	Vulnerabilities []string // vulnerabilities are specified by type and ID
+	Packages        []string  // packages are specified by purl
+	Artifacts       []string  // artifacts are specified by digest
+	Sources         []string  // sources are specified by the name in the SourceName node
+	Builders        []string  // builders are specified by URI
+	Vulnerabilities []string  // vulnerabilities are specified by type and ID
+	Licenses        []License // Licenses specified by their names inlines and list versions
 
 	/** verbs **/
 	HasSboms       []HasSbom
@@ -90,8 +96,15 @@ type GuacData struct {
 	HashEquals     []HashEqual
 	HasSlsas       []HasSlsa
 	CertifyVulns   []CertifyVuln
+	CertifyLegals  []CertifyLegal
 
 	// Other graphql verbs still need to be added here
+}
+
+type License struct {
+	Name        string
+	Inline      string
+	ListVersion string
 }
 
 type IsDependency struct {
@@ -133,6 +146,13 @@ type CertifyVuln struct {
 	Metadata      *gql.ScanMetadataInput // if nil, a default will be used
 }
 
+type CertifyLegal struct {
+	Subject            string                     // PURL for packages or source name for sources
+	DeclaredLicenses   []string                   // Names of declared licenses (must be previously ingested)
+	DiscoveredLicenses []string                   // Names of discovered licenses (must be previously ingested)
+	Legal              *gql.CertifyLegalInputSpec // If nil, a default will be used
+}
+
 // maintains the ids of nouns, to use when ingesting verbs
 type nounIds struct {
 	PackageIds       map[string]string // map from purls to IDs of PackageName nodes
@@ -140,6 +160,7 @@ type nounIds struct {
 	SourceIds        map[string]string // map from source names to IDs of SourceName nodes
 	BuilderIds       map[string]string // map from URI to IDs of Builder nodes
 	VulnerabilityIds map[string]string // map from vulnerability type and ID to IDs of Vulnerability nodes
+	LicenseIds       map[string]string // Map from license names to IDs of License nodes
 }
 
 func Ingest(ctx context.Context, t *testing.T, gqlClient graphql.Client, data GuacData) nounIds {
@@ -168,12 +189,18 @@ func Ingest(ctx context.Context, t *testing.T, gqlClient graphql.Client, data Gu
 		vulnerabilityIds[vuln] = ingestVulnerability(ctx, t, gqlClient, vuln)
 	}
 
+	licenseIds := map[string]string{}
+	for _, license := range data.Licenses {
+		licenseIds[license.Name] = ingestLicense(ctx, t, gqlClient, license)
+	}
+
 	i := nounIds{
 		PackageIds:       packageIds,
 		ArtifactIds:      artifactIds,
 		SourceIds:        sourceIds,
 		BuilderIds:       builderIds,
 		VulnerabilityIds: vulnerabilityIds,
+		LicenseIds:       licenseIds,
 	}
 
 	for _, sbom := range data.HasSboms {
@@ -198,6 +225,10 @@ func Ingest(ctx context.Context, t *testing.T, gqlClient graphql.Client, data Gu
 
 	for _, certifyVuln := range data.CertifyVulns {
 		i.ingestCertifyVuln(ctx, t, gqlClient, certifyVuln)
+	}
+
+	for _, certifyLegal := range data.CertifyLegals {
+		i.ingestCertifyLegal(ctx, t, gqlClient, certifyLegal)
 	}
 
 	return i
@@ -498,5 +529,80 @@ func (i nounIds) ingestCertifyVuln(ctx context.Context, t *testing.T, gqlClient 
 	_, err := gql.IngestCertifyVulnPkg(ctx, gqlClient, pkgSpec, vulnSpec, *spec)
 	if err != nil {
 		t.Fatalf("Error ingesting CertifyVuln when setting up test: %s", err)
+	}
+}
+
+func ingestLicense(ctx context.Context, t *testing.T, gqlClient graphql.Client, license License) string {
+	licenseInput := gql.IDorLicenseInput{
+		LicenseInput: &gql.LicenseInputSpec{
+			Name:        license.Name,
+			Inline:      &license.Inline,
+			ListVersion: &license.ListVersion,
+		},
+	}
+
+	res, err := gql.IngestLicense(ctx, gqlClient, licenseInput)
+	if err != nil {
+		t.Fatalf("Error ingesting license %s: %v", license.Name, err)
+	}
+
+	return res.IngestLicense
+}
+
+func (i nounIds) ingestCertifyLegal(ctx context.Context, t *testing.T, gqlClient graphql.Client, certifyLegal CertifyLegal) {
+	var subjectPkgSpec *gql.IDorPkgInput
+	var subjectSrcSpec *gql.IDorSourceInput
+
+	if subjectId, ok := i.PackageIds[certifyLegal.Subject]; ok {
+		subjectPkgSpec = &gql.IDorPkgInput{PackageVersionID: &subjectId}
+	} else if subjectId, ok := i.SourceIds[certifyLegal.Subject]; ok {
+		subjectSrcSpec = &gql.IDorSourceInput{SourceNameID: &subjectId}
+	} else {
+		t.Fatalf("No subject id found for certify legal %s", certifyLegal.Subject)
+	}
+
+	declaredLicenses := []gql.IDorLicenseInput{}
+	for _, licenseName := range certifyLegal.DeclaredLicenses {
+		licenseId, ok := i.LicenseIds[licenseName]
+		if !ok {
+			t.Fatalf("The license %s has not been ingested", licenseName)
+		}
+		declaredLicenses = append(declaredLicenses, gql.IDorLicenseInput{LicenseID: &licenseId})
+	}
+
+	discoveredLicenses := []gql.IDorLicenseInput{}
+	for _, licenseName := range certifyLegal.DiscoveredLicenses {
+		licenseId, ok := i.LicenseIds[licenseName]
+		if !ok {
+			t.Fatalf("The license %s has not been ingested", licenseName)
+		}
+		discoveredLicenses = append(discoveredLicenses, gql.IDorLicenseInput{LicenseID: &licenseId})
+	}
+
+	legalInput := certifyLegal.Legal
+	if legalInput == nil {
+		legalInput = &gql.CertifyLegalInputSpec{
+			Justification: defaultCertifyLegalJustification,
+			Origin:        defaultCertifyLegalOrigin,
+			Collector:     defaultCertifyLegalCollector,
+			TimeScanned:   time.Now(),
+		}
+	}
+
+	// Ingest the CertifyLegal relationship
+	if subjectPkgSpec != nil {
+		_, err := gql.IngestCertifyLegalPkg(ctx, gqlClient, *subjectPkgSpec,
+			declaredLicenses, discoveredLicenses, *legalInput)
+		if err != nil {
+			t.Fatalf("Error ingesting CertifyLegal for package %s: %v", certifyLegal.Subject, err)
+		}
+	} else if subjectSrcSpec != nil {
+		_, err := gql.IngestCertifyLegalSrc(ctx, gqlClient, *subjectSrcSpec,
+			declaredLicenses, discoveredLicenses, *legalInput)
+		if err != nil {
+			t.Fatalf("Error ingesting CertifyLegal for source %s: %v", certifyLegal.Subject, err)
+		}
+	} else {
+		t.Fatalf("Subject %s is neither a package nor a source", certifyLegal.Subject)
 	}
 }

@@ -29,8 +29,10 @@ type EndpointType int
 const (
 	GetPackagePurls EndpointType = iota
 	GetPackageVulns
+	GetPackageLicenses
 	GetPackageDeps
 	GetArtifactVulns
+	GetArtifactLicenses
 	GetArtifactDeps
 )
 
@@ -82,6 +84,12 @@ func createBadRequestResponse(endpointType EndpointType, message string) interfa
 				Message: message,
 			},
 		}
+	case GetPackageLicenses:
+		return gen.GetPackageLicenses400JSONResponse{
+			BadRequestJSONResponse: gen.BadRequestJSONResponse{
+				Message: message,
+			},
+		}
 	case GetArtifactDeps:
 		return gen.GetArtifactDeps400JSONResponse{
 			BadRequestJSONResponse: gen.BadRequestJSONResponse{
@@ -90,6 +98,12 @@ func createBadRequestResponse(endpointType EndpointType, message string) interfa
 		}
 	case GetArtifactVulns:
 		return gen.GetArtifactVulns400JSONResponse{
+			BadRequestJSONResponse: gen.BadRequestJSONResponse{
+				Message: message,
+			},
+		}
+	case GetArtifactLicenses:
+		return gen.GetArtifactLicenses400JSONResponse{
 			BadRequestJSONResponse: gen.BadRequestJSONResponse{
 				Message: message,
 			},
@@ -119,6 +133,12 @@ func createInternalServerErrorResponse(endpointType EndpointType, message string
 				Message: message,
 			},
 		}
+	case GetPackageLicenses:
+		return gen.GetPackageLicenses500JSONResponse{
+			InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+				Message: message,
+			},
+		}
 	case GetArtifactDeps:
 		return gen.GetArtifactDeps500JSONResponse{
 			InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
@@ -127,6 +147,12 @@ func createInternalServerErrorResponse(endpointType EndpointType, message string
 		}
 	case GetArtifactVulns:
 		return gen.GetArtifactVulns500JSONResponse{
+			InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
+				Message: message,
+			},
+		}
+	case GetArtifactLicenses:
+		return gen.GetArtifactLicenses500JSONResponse{
 			InternalServerErrorJSONResponse: gen.InternalServerErrorJSONResponse{
 				Message: message,
 			},
@@ -156,6 +182,12 @@ func createBadGatewayResponse(endpointType EndpointType, message string) interfa
 				Message: message,
 			},
 		}
+	case GetPackageLicenses:
+		return gen.GetPackageLicenses502JSONResponse{
+			BadGatewayJSONResponse: gen.BadGatewayJSONResponse{
+				Message: message,
+			},
+		}
 	case GetArtifactDeps:
 		return gen.GetArtifactDeps502JSONResponse{
 			BadGatewayJSONResponse: gen.BadGatewayJSONResponse{
@@ -164,6 +196,12 @@ func createBadGatewayResponse(endpointType EndpointType, message string) interfa
 		}
 	case GetArtifactVulns:
 		return gen.GetArtifactVulns502JSONResponse{
+			BadGatewayJSONResponse: gen.BadGatewayJSONResponse{
+				Message: message,
+			},
+		}
+	case GetArtifactLicenses:
+		return gen.GetArtifactLicenses502JSONResponse{
 			BadGatewayJSONResponse: gen.BadGatewayJSONResponse{
 				Message: message,
 			},

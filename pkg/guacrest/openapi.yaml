@@ -115,6 +115,43 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "502":
           $ref: "#/components/responses/BadGateway"
+  "/v0/package/{purl}/licenses":
+    get:
+      summary: Get licenses for a Package URL (purl)
+      description: >
+        If a partial purl is passed in, then it will find all associated purls 
+        and find licenses of those. For example, if the partial purl 
+        pkg:foo/bar is passed in, it would find all purls associated with 
+        pkg:foo/bar, such as pkg:foo/bar@1.0, and pkg:foo/bar@2.0. This endpoint 
+        will then find all licenses for these purls. If the `includeDependencies`
+        flag is set to true, it will also include licenses of the dependencies.
+      operationId: getPackageLicenses
+      parameters:
+        - name: purl
+          in: path
+          required: true
+          description: URL-encoded Package URL (purl)
+          schema:
+            type: string
+        - name: includeDependencies
+          in: query
+          required: false
+          description: >
+            A flag to include licenses of the dependencies. If true, the 
+            response will include licenses for the purl and its dependencies 
+            instead of the licenses of just the purl.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          $ref: "#/components/responses/LicenseList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
   "/v0/package/{purl}/dependencies":
     get:
       summary: Get dependencies for a specific Package URL (purl)
@@ -155,6 +192,26 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/VulnerabilityList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v0/artifact/{digest}/licenses":
+    get:
+      summary: Get licenses for a specific digest
+      operationId: getArtifactLicenses
+      parameters:
+        - name: digest
+          in: path
+          required: true
+          description: Digest, the second part from artifact identifier in the format <algorithm:digest>
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/LicenseList"
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -274,6 +331,55 @@ components:
           type: string
         collector:
           type: string
+    Legal:
+      type: object
+      properties:
+        declaredLicense:
+          type: string
+          description: The license expression as declared
+        declaredLicenses:
+          type: array
+          items:
+            $ref: '#/components/schemas/License'
+          description: A list of license objects found in the declared license expression
+        discoveredLicense:
+          type: string
+          description: The license expression as discovered by scan
+        discoveredLicenses:
+          type: array
+          items:
+            $ref: '#/components/schemas/License'
+          description: A list of license objects found in the discovered license expression
+        attribution:
+          type: string
+          description: Attribution text of the subject
+        justification:
+          type: string
+          description: Extra justification for the certification
+        timeScanned:
+          type: string
+          format: date-time
+          description: Time of scan (in RFC 3339 format)
+        origin:
+          type: string
+          description: Document from which this attestation is generated from
+        collector:
+          type: string
+          description: GUAC collector for the document
+    License:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name of the license, typically the SPDX identifier
+        inline:
+          type: string
+          nullable: true
+          description: Full license text if not on the SPDX list
+        listVersion:
+          type: string
+          nullable: true
+          description: SPDX license list version
   responses:
     # for code 200
     PurlList:
@@ -308,6 +414,14 @@ components:
             type: array
             items:
               $ref: "#/components/schemas/Vulnerability"
+    LicenseList:
+      description: A list of vulnerabilities associated with the package or artifact
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/Legal"
     DependencyList:
       description: A list of dependencies associated with the package or artifact
       content:

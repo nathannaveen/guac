@@ -25,6 +25,9 @@ type ServerInterface interface {
 	// Get dependencies for a specific digest
 	// (GET /v0/artifact/{digest}/dependencies)
 	GetArtifactDeps(w http.ResponseWriter, r *http.Request, digest string)
+	// Get licenses for a specific digest
+	// (GET /v0/artifact/{digest}/licenses)
+	GetArtifactLicenses(w http.ResponseWriter, r *http.Request, digest string)
 	// Get vulnerabilities for a specific digest
 	// (GET /v0/artifact/{digest}/vulns)
 	GetArtifactVulns(w http.ResponseWriter, r *http.Request, digest string)
@@ -34,6 +37,9 @@ type ServerInterface interface {
 	// Get dependencies for a specific Package URL (purl)
 	// (GET /v0/package/{purl}/dependencies)
 	GetPackageDeps(w http.ResponseWriter, r *http.Request, purl string)
+	// Get licenses for a Package URL (purl)
+	// (GET /v0/package/{purl}/licenses)
+	GetPackageLicenses(w http.ResponseWriter, r *http.Request, purl string, params GetPackageLicensesParams)
 	// Get vulnerabilities for a Package URL (purl)
 	// (GET /v0/package/{purl}/vulns)
 	GetPackageVulns(w http.ResponseWriter, r *http.Request, purl string, params GetPackageVulnsParams)
@@ -61,6 +67,12 @@ func (_ Unimplemented) GetArtifactDeps(w http.ResponseWriter, r *http.Request, d
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get licenses for a specific digest
+// (GET /v0/artifact/{digest}/licenses)
+func (_ Unimplemented) GetArtifactLicenses(w http.ResponseWriter, r *http.Request, digest string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Get vulnerabilities for a specific digest
 // (GET /v0/artifact/{digest}/vulns)
 func (_ Unimplemented) GetArtifactVulns(w http.ResponseWriter, r *http.Request, digest string) {
@@ -76,6 +88,12 @@ func (_ Unimplemented) GetPackagePurls(w http.ResponseWriter, r *http.Request, p
 // Get dependencies for a specific Package URL (purl)
 // (GET /v0/package/{purl}/dependencies)
 func (_ Unimplemented) GetPackageDeps(w http.ResponseWriter, r *http.Request, purl string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get licenses for a Package URL (purl)
+// (GET /v0/package/{purl}/licenses)
+func (_ Unimplemented) GetPackageLicenses(w http.ResponseWriter, r *http.Request, purl string, params GetPackageLicensesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -175,6 +193,31 @@ func (siw *ServerInterfaceWrapper) GetArtifactDeps(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetArtifactLicenses operation middleware
+func (siw *ServerInterfaceWrapper) GetArtifactLicenses(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "digest" -------------
+	var digest string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "digest", chi.URLParam(r, "digest"), &digest, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "digest", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetArtifactLicenses(w, r, digest)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetArtifactVulns operation middleware
 func (siw *ServerInterfaceWrapper) GetArtifactVulns(w http.ResponseWriter, r *http.Request) {
 
@@ -241,6 +284,42 @@ func (siw *ServerInterfaceWrapper) GetPackageDeps(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPackageDeps(w, r, purl)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPackageLicenses operation middleware
+func (siw *ServerInterfaceWrapper) GetPackageLicenses(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "purl" -------------
+	var purl string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "purl", chi.URLParam(r, "purl"), &purl, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "purl", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPackageLicensesParams
+
+	// ------------- Optional query parameter "includeDependencies" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "includeDependencies", r.URL.Query(), &params.IncludeDependencies)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "includeDependencies", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPackageLicenses(w, r, purl, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -409,6 +488,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v0/artifact/{digest}/dependencies", wrapper.GetArtifactDeps)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v0/artifact/{digest}/licenses", wrapper.GetArtifactLicenses)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v0/artifact/{digest}/vulns", wrapper.GetArtifactVulns)
 	})
 	r.Group(func(r chi.Router) {
@@ -416,6 +498,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v0/package/{purl}/dependencies", wrapper.GetPackageDeps)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v0/package/{purl}/licenses", wrapper.GetPackageLicenses)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v0/package/{purl}/vulns", wrapper.GetPackageVulns)
@@ -429,6 +514,8 @@ type BadGatewayJSONResponse Error
 type BadRequestJSONResponse Error
 
 type InternalServerErrorJSONResponse Error
+
+type LicenseListJSONResponse []Legal
 
 type PackageNameListJSONResponse []PackageName
 
@@ -542,6 +629,52 @@ func (response GetArtifactDeps500JSONResponse) VisitGetArtifactDepsResponse(w ht
 type GetArtifactDeps502JSONResponse struct{ BadGatewayJSONResponse }
 
 func (response GetArtifactDeps502JSONResponse) VisitGetArtifactDepsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetArtifactLicensesRequestObject struct {
+	Digest string `json:"digest"`
+}
+
+type GetArtifactLicensesResponseObject interface {
+	VisitGetArtifactLicensesResponse(w http.ResponseWriter) error
+}
+
+type GetArtifactLicenses200JSONResponse struct{ LicenseListJSONResponse }
+
+func (response GetArtifactLicenses200JSONResponse) VisitGetArtifactLicensesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetArtifactLicenses400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetArtifactLicenses400JSONResponse) VisitGetArtifactLicensesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetArtifactLicenses500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetArtifactLicenses500JSONResponse) VisitGetArtifactLicensesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetArtifactLicenses502JSONResponse struct{ BadGatewayJSONResponse }
+
+func (response GetArtifactLicenses502JSONResponse) VisitGetArtifactLicensesResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(502)
 
@@ -686,6 +819,53 @@ func (response GetPackageDeps502JSONResponse) VisitGetPackageDepsResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetPackageLicensesRequestObject struct {
+	Purl   string `json:"purl"`
+	Params GetPackageLicensesParams
+}
+
+type GetPackageLicensesResponseObject interface {
+	VisitGetPackageLicensesResponse(w http.ResponseWriter) error
+}
+
+type GetPackageLicenses200JSONResponse struct{ LicenseListJSONResponse }
+
+func (response GetPackageLicenses200JSONResponse) VisitGetPackageLicensesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetPackageLicenses400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetPackageLicenses400JSONResponse) VisitGetPackageLicensesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetPackageLicenses500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetPackageLicenses500JSONResponse) VisitGetPackageLicensesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetPackageLicenses502JSONResponse struct{ BadGatewayJSONResponse }
+
+func (response GetPackageLicenses502JSONResponse) VisitGetPackageLicensesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetPackageVulnsRequestObject struct {
 	Purl   string `json:"purl"`
 	Params GetPackageVulnsParams
@@ -744,6 +924,9 @@ type StrictServerInterface interface {
 	// Get dependencies for a specific digest
 	// (GET /v0/artifact/{digest}/dependencies)
 	GetArtifactDeps(ctx context.Context, request GetArtifactDepsRequestObject) (GetArtifactDepsResponseObject, error)
+	// Get licenses for a specific digest
+	// (GET /v0/artifact/{digest}/licenses)
+	GetArtifactLicenses(ctx context.Context, request GetArtifactLicensesRequestObject) (GetArtifactLicensesResponseObject, error)
 	// Get vulnerabilities for a specific digest
 	// (GET /v0/artifact/{digest}/vulns)
 	GetArtifactVulns(ctx context.Context, request GetArtifactVulnsRequestObject) (GetArtifactVulnsResponseObject, error)
@@ -753,6 +936,9 @@ type StrictServerInterface interface {
 	// Get dependencies for a specific Package URL (purl)
 	// (GET /v0/package/{purl}/dependencies)
 	GetPackageDeps(ctx context.Context, request GetPackageDepsRequestObject) (GetPackageDepsResponseObject, error)
+	// Get licenses for a Package URL (purl)
+	// (GET /v0/package/{purl}/licenses)
+	GetPackageLicenses(ctx context.Context, request GetPackageLicensesRequestObject) (GetPackageLicensesResponseObject, error)
 	// Get vulnerabilities for a Package URL (purl)
 	// (GET /v0/package/{purl}/vulns)
 	GetPackageVulns(ctx context.Context, request GetPackageVulnsRequestObject) (GetPackageVulnsResponseObject, error)
@@ -863,6 +1049,32 @@ func (sh *strictHandler) GetArtifactDeps(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// GetArtifactLicenses operation middleware
+func (sh *strictHandler) GetArtifactLicenses(w http.ResponseWriter, r *http.Request, digest string) {
+	var request GetArtifactLicensesRequestObject
+
+	request.Digest = digest
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetArtifactLicenses(ctx, request.(GetArtifactLicensesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetArtifactLicenses")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetArtifactLicensesResponseObject); ok {
+		if err := validResponse.VisitGetArtifactLicensesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetArtifactVulns operation middleware
 func (sh *strictHandler) GetArtifactVulns(w http.ResponseWriter, r *http.Request, digest string) {
 	var request GetArtifactVulnsRequestObject
@@ -934,6 +1146,33 @@ func (sh *strictHandler) GetPackageDeps(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetPackageDepsResponseObject); ok {
 		if err := validResponse.VisitGetPackageDepsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPackageLicenses operation middleware
+func (sh *strictHandler) GetPackageLicenses(w http.ResponseWriter, r *http.Request, purl string, params GetPackageLicensesParams) {
+	var request GetPackageLicensesRequestObject
+
+	request.Purl = purl
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPackageLicenses(ctx, request.(GetPackageLicensesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPackageLicenses")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPackageLicensesResponseObject); ok {
+		if err := validResponse.VisitGetPackageLicensesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

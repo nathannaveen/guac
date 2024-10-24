@@ -166,6 +166,28 @@ func (s *DefaultServer) GetPackageVulns(ctx context.Context, request gen.GetPack
 	return result, nil
 }
 
+func (s *DefaultServer) GetPackageLicenses(ctx context.Context, request gen.GetPackageLicensesRequestObject) (gen.GetPackageLicensesResponseObject, error) {
+	licenses, err := searchLicensesViaPkg(ctx, s.gqlClient, request.Purl, request.Params.IncludeDependencies)
+	if err != nil {
+		err, ok := handleErr(ctx, err, GetPackageLicenses).(gen.GetPackageLicensesResponseObject)
+		if ok {
+			return err, nil
+		} else {
+			return gen.GetPackageLicenses400JSONResponse{
+				BadRequestJSONResponse: gen.BadRequestJSONResponse{
+					Message: "Error handling failed",
+				},
+			}, nil
+		}
+	}
+
+	result := gen.GetPackageLicenses200JSONResponse{
+		LicenseListJSONResponse: licenses,
+	}
+
+	return result, nil
+}
+
 func (s *DefaultServer) GetPackageDeps(ctx context.Context, request gen.GetPackageDepsRequestObject) (gen.GetPackageDepsResponseObject, error) {
 	purls, err := GetDepsForPackage(ctx, s.gqlClient, request.Purl)
 	if err != nil {
@@ -208,6 +230,29 @@ func (s *DefaultServer) GetArtifactVulns(ctx context.Context, request gen.GetArt
 
 	result := gen.GetArtifactVulns200JSONResponse{}
 	result.VulnerabilityListJSONResponse = append(result.VulnerabilityListJSONResponse, vulnerabilities...)
+
+	return result, nil
+}
+
+func (s *DefaultServer) GetArtifactLicenses(ctx context.Context, request gen.GetArtifactLicensesRequestObject) (gen.GetArtifactLicensesResponseObject, error) {
+	// Call the helper function to search for vulnerabilities
+	licenses, err := searchLicensesViaArtifact(ctx, s.gqlClient, request.Digest)
+	if err != nil {
+		err, ok := handleErr(ctx, err, GetArtifactLicenses).(gen.GetArtifactLicensesResponseObject)
+		if ok {
+			return err, nil
+		} else {
+			return gen.GetArtifactLicenses400JSONResponse{
+				BadRequestJSONResponse: gen.BadRequestJSONResponse{
+					Message: "Error handling failed",
+				},
+			}, nil
+		}
+	}
+
+	result := gen.GetArtifactLicenses200JSONResponse{
+		LicenseListJSONResponse: licenses,
+	}
 
 	return result, nil
 }

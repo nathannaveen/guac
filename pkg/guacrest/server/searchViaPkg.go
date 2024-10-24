@@ -48,12 +48,12 @@ func searchVulnerabilitiesViaPkg(ctx context.Context, gqlClient graphql.Client, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to unescape package url: %w", err)
 	}
-	pkg, err := helpers.FindPackageWithPurl(ctx, gqlClient, unescapedPurl)
+	pkgFromPurl, err := helpers.FindPackageWithPurl(ctx, gqlClient, unescapedPurl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find package with purl: %w", err)
 	}
 
-	var n = &pkg
+	var n = &pkgFromPurl
 
 	pkgs, err := mapPkgNodesToPurls(ctx, gqlClient, []node{n})
 	if err != nil {
@@ -108,4 +108,102 @@ func searchVulnerabilitiesViaPkg(ctx context.Context, gqlClient graphql.Client, 
 	}
 
 	return vulnerabilities, nil
+}
+
+// searchLicensesViaPkg searches for licenses associated with the given package
+// and its dependencies.
+//
+// Parameters:
+// - ctx: The context for the operation
+// - gqlClient: The GraphQL client used for querying
+// - purl: The package URL to start the search from
+// - includeDependencies: Whether the code should search for licenses of the dependencies
+//
+// Returns:
+// - A slice of License objects
+// - An error
+//
+// The function performs a breadth-first search starting from the given package,
+// collecting licenses for each package and its dependencies.
+func searchLicensesViaPkg(ctx context.Context, gqlClient graphql.Client, purl string, includeDependencies *bool) (gen.LicenseList, error) {
+	logger := logging.FromContext(ctx)
+	var licenses gen.LicenseList
+
+	unescapedPurl, err := url.QueryUnescape(purl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unescape package url: %w", err)
+	}
+	pkgFromPurl, err := helpers.FindPackageWithPurl(ctx, gqlClient, unescapedPurl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find package with purl: %w", err)
+	}
+
+	var n = &pkgFromPurl
+
+	pkgs, err := mapPkgNodesToPurls(ctx, gqlClient, []node{n})
+	if err != nil {
+		return nil, fmt.Errorf("failed to map package nodes to purls: %w", err)
+	}
+
+	if includeDependencies != nil && *includeDependencies {
+		dependencies, err := GetDepsForPackage(ctx, gqlClient, purl)
+		if err != nil {
+			return nil, fmt.Errorf("error searching dependencies: %w", err)
+		}
+		for k, v := range dependencies {
+			pkgs[k] = v
+		}
+	}
+
+	for pkg := range pkgs {
+		certLegals, err := model.CertifyLegal(ctx, gqlClient, model.CertifyLegalSpec{
+			Subject: &model.PackageOrSourceSpec{
+				Package: &model.PkgSpec{
+					Id: &pkg,
+				},
+			},
+		})
+		if err != nil {
+			logger.Errorf("error fetching licenses from package spec: %v", err)
+			return nil, helpers.Err502
+		}
+
+		for _, lic := range certLegals.CertifyLegal {
+			license := gen.Legal{
+				Attribution:       &lic.Attribution,
+				Collector:         &lic.Collector,
+				DeclaredLicense:   &lic.DeclaredLicense,
+				DiscoveredLicense: &lic.DiscoveredLicense,
+				Justification:     &lic.Justification,
+				Origin:            &lic.Origin,
+				TimeScanned:       &lic.TimeScanned,
+			}
+
+			var declaredLicenses []gen.License
+			var discoveredLicenses []gen.License
+
+			for _, declared := range lic.DeclaredLicenses {
+				declaredLicenses = append(declaredLicenses, gen.License{
+					Inline:      declared.Inline,
+					ListVersion: declared.ListVersion,
+					Name:        &declared.Name,
+				})
+			}
+
+			for _, discovered := range lic.DiscoveredLicenses {
+				discoveredLicenses = append(discoveredLicenses, gen.License{
+					Inline:      discovered.Inline,
+					ListVersion: discovered.ListVersion,
+					Name:        &discovered.Name,
+				})
+			}
+
+			license.DeclaredLicenses = &declaredLicenses
+			license.DiscoveredLicenses = &discoveredLicenses
+
+			licenses = append(licenses, license)
+		}
+	}
+
+	return licenses, nil
 }
